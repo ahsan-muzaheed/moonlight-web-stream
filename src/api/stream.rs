@@ -205,6 +205,11 @@ pub async fn start_host(
         .await;
 
         // Spawn child
+        info!(
+            "[Stream]: spawning streamer process: streamer_path={:?}, cwd={:?}",
+            web_app.config().streamer_path,
+            std::env::current_dir().ok(),
+        );
         let (mut child, stdin, stdout) = match Command::new(&web_app.config().streamer_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -317,6 +322,16 @@ pub async fn start_host(
         });
 
         // Send init into ipc
+        info!(
+            "[Stream]: sending Init to streamer: host_address={:?}, host_http_port={}, app_id={}, client_unique_id={:?}, video_frame_queue_size={:?}, audio_sample_queue_size={:?}, log_level={:?}",
+            address,
+            http_port,
+            app_id.0,
+            client_unique_id,
+            video_frame_queue_size,
+            audio_sample_queue_size,
+            web_app.config().log.level_filter,
+        );
         ipc_sender
             .send(ServerIpcMessage::Init {
                 config: StreamerConfig {
