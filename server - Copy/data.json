@@ -1,0 +1,33 @@
+{
+  "version": "3",
+  "users": {
+    "3724516834": {
+      "role_id": 2555005259,
+      "name": "abc",
+      "password": {
+        "salt": "f5dc7197e9d720d3a96a4e28951fbbcd",
+        "hash": "9eac8d2063437c807d306795f59ffe06ec1286a2c4291cc6b3dd247de45d1f58",
+        "iterations": 600000
+      },
+      "client_unique_id": "abc"
+    }
+  },
+  "hosts": {},
+  "roles": {
+    "2555005259": {
+      "name": "Admin",
+      "ty": "Admin",
+      "default_settings": null,
+      "permissions": {
+        "allow_add_hosts": true,
+        "maximum_bitrate_kbps": null,
+        "allow_codec_h264": true,
+        "allow_codec_h265": true,
+        "allow_codec_av1": true,
+        "allow_hdr": true,
+        "allow_transport_webrtc": true,
+        "allow_transport_websockets": true
+      }
+    }
+  }
+}
