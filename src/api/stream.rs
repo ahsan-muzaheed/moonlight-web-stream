@@ -322,34 +322,29 @@ pub async fn start_host(
         });
 
         // Send init into ipc
-        info!(
-            "[Stream]: sending Init to streamer: host_address={:?}, host_http_port={}, app_id={}, client_unique_id={:?}, video_frame_queue_size={:?}, audio_sample_queue_size={:?}, log_level={:?}",
-            address,
-            http_port,
-            app_id.0,
-            client_unique_id,
+        let init = ServerIpcMessage::Init {
+            config: StreamerConfig {
+                webrtc: web_app.config().webrtc.clone(),
+                log_level: web_app.config().log.level_filter,
+            },
+            host_address: address,
+            host_http_port: http_port,
+            client_unique_id: Some(client_unique_id),
+            client_private_key: pair_info.client_private_key,
+            client_certificate: pair_info.client_certificate,
+            server_certificate: pair_info.server_certificate,
+            app_id: app_id.0,
             video_frame_queue_size,
             audio_sample_queue_size,
-            web_app.config().log.level_filter,
-        );
-        ipc_sender
-            .send(ServerIpcMessage::Init {
-                config: StreamerConfig {
-                    webrtc: web_app.config().webrtc.clone(),
-                    log_level: web_app.config().log.level_filter,
-                },
-                host_address: address,
-                host_http_port: http_port,
-                client_unique_id: Some(client_unique_id),
-                client_private_key: pair_info.client_private_key,
-                client_certificate: pair_info.client_certificate,
-                server_certificate: pair_info.server_certificate,
-                app_id: app_id.0,
-                video_frame_queue_size,
-                audio_sample_queue_size,
-                permissions,
-            })
-            .await;
+            permissions,
+        };
+
+        // Full detail of every parameter handed to the streamer over IPC (stdin).
+        // NOTE: this includes `client_private_key` (a secret). Fine for local debugging;
+        // redact or drop to DEBUG/TRACE if these logs are shared or persisted.
+        info!("[Stream]: sending Init to streamer (full detail):\n{init:#?}");
+
+        ipc_sender.send(init).await;
 
         // Redirect ws message into ipc
         while let Some(Ok(message)) = stream.recv().await {
