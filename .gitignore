@@ -13,6 +13,6 @@ bindings
 web/api_bindings.ts
 
 # Server
-server
+#server
 
 /.idea
