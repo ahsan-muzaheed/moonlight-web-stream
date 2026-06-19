@@ -80,7 +80,7 @@ function isFirefox() {
 const WEBRTC_CONNECT_TIMEOUT_MS = 15000;
 const FALLBACK_RECONNECT_DELAY_MS = 500;
 export class Stream {
-    constructor(api, hostId, appId, settings, viewerScreenSize, permissions) {
+    constructor(api, hostId, appId, demoParam, settings, viewerScreenSize, permissions) {
         this.logger = new Logger();
         this.divElement = document.createElement("div");
         this.eventTarget = new EventTarget();
@@ -100,6 +100,7 @@ export class Stream {
         this.api = api;
         this.hostId = hostId;
         this.appId = appId;
+        this.demoParam = demoParam;
         this.permissions = permissions;
         this.settings = settings;
         this.streamerSize = getStreamerSize(settings, viewerScreenSize);
@@ -299,6 +300,7 @@ export class Stream {
             Init: {
                 host_id: this.hostId,
                 app_id: this.appId,
+                demo_param: this.demoParam,
                 video_frame_queue_size: this.settings.videoFrameQueueSize,
                 audio_sample_queue_size: this.settings.audioSampleQueueSize,
             }

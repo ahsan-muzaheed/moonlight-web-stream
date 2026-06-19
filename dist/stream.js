@@ -49,6 +49,7 @@ function startApp() {
         }
         const hostId = Number.parseInt(hostIdStr);
         const appId = Number.parseInt(appIdStr);
+        const demoParam = queryParams.get("demoParam");
         // event propagation on overlays
         const sidebarRoot = getSidebarRoot();
         if (sidebarRoot) {
@@ -59,7 +60,7 @@ function startApp() {
             stopPropagationOn(modalBackground);
         }
         // Start and Mount App
-        const app = new ViewerApp(api, hostId, appId, bootstrapRole.role, parseSettingsFromQuery(queryParams));
+        const app = new ViewerApp(api, hostId, appId, demoParam, bootstrapRole.role, parseSettingsFromQuery(queryParams));
         app.mount(rootElement);
         window["app"] = app;
     });
@@ -111,7 +112,7 @@ function parseLanguageFromQuery(queryParams) {
 }
 startApp();
 class ViewerApp {
-    constructor(api, hostId, appId, bootstrapRole, options) {
+    constructor(api, hostId, appId, demoParam, bootstrapRole, options) {
         this.div = document.createElement("div");
         this.statsDiv = document.createElement("div");
         this.localTouchCursorDiv = document.createElement("div");
@@ -167,7 +168,7 @@ class ViewerApp {
         const browserHeight = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
         this.autoEnterFullscreenOnStart = settings.enterFullscreenOnStreamStart;
         this.toggleFullscreenWithKeybind = settings.toggleFullscreenWithKeybind;
-        this.stream = new Stream(this.api, hostId, appId, settings, [browserWidth, browserHeight], bootstrapRole.permissions);
+        this.stream = new Stream(this.api, hostId, appId, demoParam, settings, [browserWidth, browserHeight], bootstrapRole.permissions);
         this.startStream(hostId, appId, bootstrapRole.permissions, settings, [browserWidth, browserHeight]);
         // Configure input
         this.addListeners(document);

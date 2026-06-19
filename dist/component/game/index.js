@@ -111,10 +111,14 @@ export class Game {
         });
     }
     startStream() {
-        let query = new URLSearchParams({
+        const query = new URLSearchParams({
             hostId: this.getHostId(),
             appId: this.getAppId(),
         });
+        const demoParam = new URLSearchParams(location.search).get("demoParam");
+        if (demoParam != null) {
+            query.set("demoParam", demoParam);
+        }
         if (window.matchMedia('(display-mode: standalone)').matches) {
             // If we're in a pwa: open in the current tab
             // If we don't do this we might get a url bar at the top
