@@ -54,7 +54,7 @@
     "default_http_port": 47989,
     "pair_device_name": "roth"
   },
-  "streamer_path": "./streamer",
+  "streamer_path": "./target/debug/streamer",
   "log": {
     "level_filter": "INFO",
     "file_path": null,
