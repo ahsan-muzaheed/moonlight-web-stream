@@ -97,6 +97,7 @@ export class Stream implements Component {
 
     private hostId: number
     private appId: number
+    private demoParam: string | null
 
     private permissions: StreamPermissions
     private settings: Settings
@@ -119,7 +120,7 @@ export class Stream implements Component {
     private hasVideoReady = false
     private hasDispatchedVideoReady = false
 
-    constructor(api: Api, hostId: number, appId: number, settings: Settings, viewerScreenSize: [number, number], permissions: StreamPermissions) {
+    constructor(api: Api, hostId: number, appId: number, demoParam: string | null, settings: Settings, viewerScreenSize: [number, number], permissions: StreamPermissions) {
         this.logger.addInfoListener((info, type) => {
             this.debugLog(info, { type: type ?? undefined })
         })
@@ -128,6 +129,7 @@ export class Stream implements Component {
 
         this.hostId = hostId
         this.appId = appId
+        this.demoParam = demoParam
 
         this.permissions = permissions
         this.settings = settings
@@ -352,6 +354,7 @@ export class Stream implements Component {
             Init: {
                 host_id: this.hostId,
                 app_id: this.appId,
+                demo_param: this.demoParam,
                 video_frame_queue_size: this.settings.videoFrameQueueSize,
                 audio_sample_queue_size: this.settings.audioSampleQueueSize,
             }

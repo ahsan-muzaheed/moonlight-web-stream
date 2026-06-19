@@ -46,6 +46,7 @@ async function startApp() {
     }
     const hostId = Number.parseInt(hostIdStr)
     const appId = Number.parseInt(appIdStr)
+    const demoParam = queryParams.get("demoParam")
 
     // event propagation on overlays
     const sidebarRoot = getSidebarRoot()
@@ -59,7 +60,7 @@ async function startApp() {
     }
 
     // Start and Mount App
-    const app = new ViewerApp(api, hostId, appId, bootstrapRole.role, parseSettingsFromQuery(queryParams))
+    const app = new ViewerApp(api, hostId, appId, demoParam, bootstrapRole.role, parseSettingsFromQuery(queryParams))
     app.mount(rootElement);
 
     (window as any)["app"] = app
@@ -146,7 +147,7 @@ class ViewerApp implements Component {
     private keyboardViewportBaselineHeight: number | null = null
     private streamVideoTopOffsetPx: number = 0
 
-    constructor(api: Api, hostId: number, appId: number, bootstrapRole: DetailedRole, options?: Partial<Settings>) {
+    constructor(api: Api, hostId: number, appId: number, demoParam: string | null, bootstrapRole: DetailedRole, options?: Partial<Settings>) {
         this.api = api
 
         const defaultSettings = getLocalStreamSettings(bootstrapRole.default_settings)
@@ -200,7 +201,7 @@ class ViewerApp implements Component {
         this.autoEnterFullscreenOnStart = settings.enterFullscreenOnStreamStart
         this.toggleFullscreenWithKeybind = settings.toggleFullscreenWithKeybind
 
-        this.stream = new Stream(this.api, hostId, appId, settings, [browserWidth, browserHeight], bootstrapRole.permissions)
+        this.stream = new Stream(this.api, hostId, appId, demoParam, settings, [browserWidth, browserHeight], bootstrapRole.permissions)
         this.startStream(hostId, appId, bootstrapRole.permissions, settings, [browserWidth, browserHeight])
 
         // Configure input

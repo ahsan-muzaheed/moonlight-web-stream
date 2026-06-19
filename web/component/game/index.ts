@@ -135,10 +135,14 @@ export class Game implements Component {
         }
     }
     private startStream() {
-        let query = new URLSearchParams({
+        const query = new URLSearchParams({
             hostId: this.getHostId(),
             appId: this.getAppId(),
         } as any)
+        const demoParam = new URLSearchParams(location.search).get("demoParam")
+        if (demoParam != null) {
+            query.set("demoParam", demoParam)
+        }
 
         if (window.matchMedia('(display-mode: standalone)').matches) {
             // If we're in a pwa: open in the current tab
