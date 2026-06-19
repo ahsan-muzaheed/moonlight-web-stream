@@ -465,6 +465,7 @@ pub enum StreamClientMessage {
     Init {
         host_id: u32,
         app_id: u32,
+        demo_param: Option<String>,
         video_frame_queue_size: usize,
         audio_sample_queue_size: usize,
     },

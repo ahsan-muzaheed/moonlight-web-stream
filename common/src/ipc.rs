@@ -37,6 +37,7 @@ pub enum ServerIpcMessage {
         client_certificate: Pem,
         server_certificate: Pem,
         app_id: u32,
+        demo_param: Option<String>,
         video_frame_queue_size: usize,
         audio_sample_queue_size: usize,
         permissions: StreamPermissions,
