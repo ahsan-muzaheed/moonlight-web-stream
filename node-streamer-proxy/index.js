@@ -108,7 +108,7 @@ app.get('/api/role', (req, res) => {
     }
 }
 
-    res.json();
+    res.json(obj);
 });
 
     // --- WebSocket Server Code ---
