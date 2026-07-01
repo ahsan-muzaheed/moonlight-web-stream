@@ -143,10 +143,19 @@ var http_obj = require('http').Server(app);
 					
 					const parsed = JSON.parse(fsgsg);
 
-                    const initMessage = parsed.Init
-					//if (initMessage.type !== 'Init') 
+                    const initData = parsed.Init
+					//if (initData.type !== 'Init') 
                     if (parsed && parsed.Init)    
-                    {}
+                    {
+						
+						 // --- LOG: Init Received ---
+            console.log(`[Stream]: Received Init message for host: ${initData.host_id || 'UNKNOWN_HOST'}, app: ${initData.app_id || 'UNKNOWN_APP'}`);
+
+            console.log(`[Stream]: spawning streamer process: streamer_path=${STREAMER_PATH}, cwd=${process.cwd()}`);
+
+						
+						
+					}
                     else
                     {
 						console.warn("Expected Init message, closing connection");
@@ -155,8 +164,8 @@ var http_obj = require('http').Server(app);
 					}
 
 					// 2. Dummy Placeholders for DB/Auth lookups
-					const hostData = await getHostDataFromDB(initMessage.host_id);
-					const app = await getAppFromHost(hostData, initMessage.app_id);
+					const hostData = await getHostDataFromDB(initData.host_id);
+					const app = await getAppFromHost(hostData, initData.app_id);
 					const pairInfo = await getPairInfo(hostData);
 
 					// 3. Spawn the Streamer Process
@@ -165,23 +174,178 @@ var http_obj = require('http').Server(app);
 					});
 
 					console.log(`Streamer spawned with PID: ${streamer.pid}`);
+					if (streamer.pid) {
+                console.log(`[Stream]: Streamer spawned successfully with PID: ${streamer.pid}`);
+            } else {
+                console.error("[Stream]: FAILED to spawn streamer process");
+            }
 
-					// 4. Send Initial Config to Streamer via Stdin
+				/* 
+								 let init = ServerIpcMessage::Init {
+											config: StreamerConfig {
+												webrtc: web_app.config().webrtc.clone(),
+												log_level: web_app.config().log.level_filter,
+											},
+											host_address: address,
+											host_http_port: http_port,
+											client_unique_id: Some(client_unique_id),
+											client_private_key: pair_info.client_private_key,
+											client_certificate: pair_info.client_certificate,
+											server_certificate: pair_info.server_certificate,
+											app_id: app_id.0,
+											demo_param,
+											video_frame_queue_size,
+											audio_sample_queue_size,
+											permissions,
+										};
+								// 4. Send Initial Config to Streamer via Stdin
+				 
+				 
+								 let obj11 = ServerIpcMessage::Init {
+									 
+											config: StreamerConfig {
+												webrtc: web_app.config().webrtc.clone(),
+												log_level: "Info",
+											},
+											
+											
+											host_address: "localhost",
+											host_http_port: 47989,
+											client_unique_id: "abc",
+											
+											
+											client_private_key: pair_info.client_private_key,
+											client_certificate: pair_info.client_certificate,
+											server_certificate: pair_info.server_certificate,
+											app_id: 1551091393,
+											demo_param:None,
+											video_frame_queue_size:3,
+											audio_sample_queue_size:20,
+											
+											permissions:parsed.Init.role.permissions,
+										};
+				 
 					const serverIpcInit = {
 						type: 'Init',
 						config: APP_CONFIG,
 						host_address: hostData.address,
 						// ... map other fields from your Rust Init struct
 					};
-					streamer.stdin.write(JSON.stringify(serverIpcInit) + '\n');
+					
+					const keyPath = path.join(__dirname, `../${config_universal.sslKeyFilePath}`);
+					const certPath = path.join(__dirname, `../${config_universal.sslCertFilePath}`);
+					console.log("keyPath: "+keyPath);
+					console.log("certPath: "+certPath);
+					if (config.UseHTTPS) {
+						//HTTPS certificate details
+						ssCertOptions = {
+							key: fs.readFileSync(keyPath),
+							cert: fs.readFileSync(certPath)
+						};	
+					
+					 */
+
+
+				 
+					 
+					var fwsfsg={
+					  "Init": {
+						"config": {
+						  "webrtc": {
+							"ice_servers": [
+							  {
+								"is_default": false,
+								"urls": [
+								  "stun:stun.l.google.com:19302",
+								  "stun:stun.l.google.com:5349",
+								  "stun:stun1.l.google.com:3478",
+								  "stun:stun1.l.google.com:5349",
+								  "stun:stun2.l.google.com:19302",
+								  "stun:stun2.l.google.com:5349",
+								  "stun:stun3.l.google.com:3478",
+								  "stun:stun3.l.google.com:5349",
+								  "stun:stun4.l.google.com:19302",
+								  "stun:stun4.l.google.com:5349"
+								],
+								"username": "",
+								"credential": ""
+							  }
+							],
+							"ice_server_script": null,
+							"port_range": null,
+							"nat_1to1": null,
+							"network_types": [
+							  "Udp4",
+							  "Udp6"
+							],
+							"include_loopback_candidates": true
+						  },
+						  "log_level": "Info"
+						},
+						"host_address": "localhost",
+						"host_http_port": 47989,
+						"client_unique_id": "abc",
+						"client_private_key": {
+						  "tag": "PRIVATE KEY",
+						  "headers": {},
+						  "contents": []
+						},
+						"client_certificate": {
+						  "tag": "CERTIFICATE",
+						  "headers": {},
+						  "contents": []
+						},
+						"server_certificate": {
+						  "tag": "CERTIFICATE",
+						  "headers": {},
+						  "contents": []
+						},
+						"app_id": 1551091393,
+						"demo_param": null,
+						"video_frame_queue_size": 3,
+						"audio_sample_queue_size": 20,
+						"permissions": {
+						  "allow_add_hosts": true,
+						  "maximum_bitrate_kbps": null,
+						  "allow_codec_h264": true,
+						  "allow_codec_h265": true,
+						  "allow_codec_av1": true,
+						  "allow_hdr": true,
+						  "allow_transport_webrtc": true,
+						  "allow_transport_websockets": true
+						}
+					  }
+					}
+					
+					// --- LOG: Sending Init ---
+				// NOTE: Redact secrets in production!
+				console.log(`[Stream]: Sending Init to streamer: ${JSON.stringify(fwsfsg, null, 2)}`);
+
+
+					var fsgsg=JSON.stringify(fwsfsg) + '\n'
+					
+					console.warn('streamer.stdin.write fsgsg :',fwsfsg);
+					
+					streamer.stdin.write(fsgsg);
 
 					// 5. IPC Handling: Streamer Stdout -> WebSocket
-					streamer.stdout.on('data', (data) => {
+					streamer.stdout.on('data', (chunk) => {
+						
+						console.warn('Streamer -> ws chunk :', chunk.toString('utf8'));
+						
 						// Assuming streamer sends JSON IPC messages
 						// You may need to parse stream chunks if they are not newline-delimited
-						ws.send(data); 
+						 //if (ws.readyState === WebSocket.OPEN) 
+							 ws.send(chunk);
+						
+						//ws.send(chunk); 
 					});
 
+
+				streamer.stderr.on('data', (err) => {
+                // --- LOG: Streamer Stderr ---
+                console.error(`[Streamer Stderr]: ${err.toString()}`);
+            });
 					// 6. WebSocket -> Streamer Stdin
 					ws.on('message', (message1) => 
 					{
