@@ -709,6 +709,10 @@ export class Stream {
     }
     sendWsMessage(message) {
         const raw = JSON.stringify(message);
+		
+		//console.log(`sendWsMessage(): `, message);
+		console.log(`sendWsMessage(): `, raw);
+		
         if (this.ws.readyState == WebSocket.OPEN) {
             this.ws.send(raw);
         }
