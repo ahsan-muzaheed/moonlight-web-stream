@@ -104,20 +104,102 @@ app.get('/api/role', (req, res) => {
     });
 
     // Connection handler
-    wss.on('connection', (ws) => {
-        console.log('Client connected to WebSocket /host/stream');
-        
-        ws.on('message', (message) => {
-            console.log('Received:', message.toString());
-            // Add your Moonlight protocol logic here
-        });
+		wss.on('connection', (ws, request) => {
+			console.log('Client connected to /host/stream');
+			
+			// 1. Initial Handshake: Wait for the first "Init" message
+			ws.once('message', async (data) => {
+				try {
+					const initMessage = JSON.parse(data.toString());
+					if (initMessage.type !== 'Init') {
+						console.warn("Expected Init message, closing connection");
+						ws.close();
+						return;
+					}
 
-        ws.on('close', () => console.log('Client disconnected'));
-    });
-    // --- End WebSocket Server Code ---
+					// 2. Dummy Placeholders for DB/Auth lookups
+					const hostData = await getHostDataFromDB(initMessage.host_id);
+					const app = await getAppFromHost(hostData, initMessage.app_id);
+					const pairInfo = await getPairInfo(hostData);
+
+					// 3. Spawn the Streamer Process
+					const streamer = spawn(STREAMER_PATH, [], {
+						stdio: ['pipe', 'pipe', 'pipe']
+					});
+
+					console.log(`Streamer spawned with PID: ${streamer.pid}`);
+
+					// 4. Send Initial Config to Streamer via Stdin
+					const serverIpcInit = {
+						type: 'Init',
+						config: APP_CONFIG,
+						host_address: hostData.address,
+						// ... map other fields from your Rust Init struct
+					};
+					streamer.stdin.write(JSON.stringify(serverIpcInit) + '\n');
+
+					// 5. IPC Handling: Streamer Stdout -> WebSocket
+					streamer.stdout.on('data', (data) => {
+						// Assuming streamer sends JSON IPC messages
+						// You may need to parse stream chunks if they are not newline-delimited
+						ws.send(data); 
+					});
+
+					// 6. WebSocket -> Streamer Stdin
+					ws.on('message', (message) => {
+					 console.log('Received:', message.toString());
+						// Forward WS traffic to streamer process
+						streamer.stdin.write(message);
+					});
+
+					// Cleanup on close
+					ws.on('close', () => {
+					 console.log('Received:', message.toString());
+						console.log("WS closed, killing streamer...");
+						streamer.kill();
+					});
+
+					streamer.on('exit', () => {
+						console.log("Streamer process exited");
+						ws.close();
+					});
+
+				} catch (err) {
+					console.error("Initialization error:", err);
+					ws.close();
+				}
+			});
+		});
+		   
+   // --- End WebSocket Server Code ---
 
     // Start the server using the http server instance
     server.listen(PORT, HOST, () => {
         console.log(`INFO server::server: starting service: "node-web-service-${HOST}:${PORT}", worker PID: ${process.pid}, listening on: ${HOST}:${PORT}`);
     });
+}
+
+const { spawn } = require('child_process');
+
+// --- Configuration Placeholder ---
+const STREAMER_PATH = "/path/to/your/streamer";
+const APP_CONFIG = {
+    webrtc: { /* fill from your config */ },
+    logLevel: "info"
+};
+
+// --- Dummy Placeholder Functions ---
+async function getHostDataFromDB(hostId) {
+    console.log(`[TODO]: Lookup host ${hostId} in database`);
+    return { address: "127.0.0.1", port: 8080 };
+}
+
+async function getAppFromHost(host, appId) {
+    console.log(`[TODO]: Validate app ${appId} for host`);
+    return { id: appId };
+}
+
+async function getPairInfo(host) {
+    console.log(`[TODO]: Retrieve crypto keys for host pairing`);
+    return { client_private_key: "...", client_certificate: "..." };
 }
