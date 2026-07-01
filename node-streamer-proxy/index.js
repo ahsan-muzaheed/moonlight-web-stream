@@ -137,6 +137,10 @@ var http_obj = require('http').Server(app);
 			ws.once('message', async (data) => {
 				try {
                     var fsgsg=data.toString()
+					
+					console.log("page-> ws message :"+fsgsg);
+					
+					
 					const parsed = JSON.parse(fsgsg);
 
                     const initMessage = parsed.Init
@@ -179,10 +183,17 @@ var http_obj = require('http').Server(app);
 					});
 
 					// 6. WebSocket -> Streamer Stdin
-					ws.on('message', (message) => {
-					 console.log('Received:', message.toString());
-						// Forward WS traffic to streamer process
-						streamer.stdin.write(message);
+					ws.on('message', (message1) => 
+					{
+						
+						if(message1)
+						{
+							console.log('Received:', message1.toString());
+							// Forward WS traffic to streamer process
+							streamer.stdin.write(message1);
+						}
+						else 
+							console.warn('ws -> Streamer undefined message:');
 					});
 
 					// Cleanup on close
