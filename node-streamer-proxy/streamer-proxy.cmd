@@ -16,3 +16,5 @@ REM --- Where the proxy writes its IPC log ---
 if "%PROXY_LOG_FILE%"=="" set "PROXY_LOG_FILE=%~dp0ipc-proxy.log"
 
 node "%~dp0index.js" "%REAL_STREAMER_PATH%"
+
+pause
