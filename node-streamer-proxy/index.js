@@ -110,13 +110,18 @@ app.get('/api/role', (req, res) => {
 
     res.json(obj);
 });
-
+var http_obj = require('http').Server(app);
+//var https = require('https').Server(ssCertOptions, app);
     // --- WebSocket Server Code ---
-    const wss = new WebSocket.Server({ noServer: true });
+    const wss = new WebSocket.Server({ 
+        //noServer: true 
+    server: http_obj
+    });
 
-    // Handle WebSocket upgrade requests
+        // Handle WebSocket upgrade requests
     server.on('upgrade', (request, socket, head) => {
-        if (request.url === '/host/stream') {
+        // Look for the full path the client is actually sending
+        if (request.url === '/api/host/stream') {
             wss.handleUpgrade(request, socket, head, (ws) => {
                 wss.emit('connection', ws, request);
             });
@@ -124,7 +129,6 @@ app.get('/api/role', (req, res) => {
             socket.destroy();
         }
     });
-
     // Connection handler
 		wss.on('connection', (ws, request) => {
 			console.log('Client connected to /host/stream');
@@ -132,8 +136,15 @@ app.get('/api/role', (req, res) => {
 			// 1. Initial Handshake: Wait for the first "Init" message
 			ws.once('message', async (data) => {
 				try {
-					const initMessage = JSON.parse(data.toString());
-					if (initMessage.type !== 'Init') {
+                    var fsgsg=data.toString()
+					const parsed = JSON.parse(fsgsg);
+
+                    const initMessage = parsed.Init
+					//if (initMessage.type !== 'Init') 
+                    if (parsed && parsed.Init)    
+                    {}
+                    else
+                    {
 						console.warn("Expected Init message, closing connection");
 						ws.close();
 						return;
@@ -202,9 +213,27 @@ app.get('/api/role', (req, res) => {
 }
 
 const { spawn } = require('child_process');
+const fs = require('fs');
+// 1. Construct the absolute path correctly
+// Ensure the path is relative to your server file location
+const STREAMER_PATH = path.resolve(__dirname, '../target/debug/streamer.exe');
+//C:\Users\e3ds\Desktop\moonlight-web-stream\target\debug\streamer.exe
+// 2. Use fs.statSync to verify it's a file that exists
 
-// --- Configuration Placeholder ---
-const STREAMER_PATH = "/path/to/your/streamer";
+
+
+try {
+    const stats = fs.statSync(STREAMER_PATH);
+    if (!stats.isFile()) {
+        throw new Error("Path exists but is not a file");
+    }
+    console.log(`INFO: Streamer binary verified at: ${STREAMER_PATH}`);
+} catch (err) {
+    console.error(`FATAL ERROR: Streamer binary not found at: ${STREAMER_PATH}`);
+    console.error(`Details: ${err.message}`);
+    process.exit(1);
+}
+
 const APP_CONFIG = {
     webrtc: { /* fill from your config */ },
     logLevel: "info"
