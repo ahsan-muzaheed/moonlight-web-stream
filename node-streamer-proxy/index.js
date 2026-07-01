@@ -82,11 +82,33 @@ app.get('/api/role', (req, res) => {
     // for a successful authentication handshake.
     // NOTE: If you don't know the exact JSON structure, check the original 
     // Rust server code or browser Network tab for a successful response.
-    res.json({
+	
+	var obj={
         status: "success",
         authenticated: true,
         sessionToken: "manual-mock-token" 
-    });
+    }
+	
+	obj={
+    "role": {
+        "id": 543368717,
+        "name": "Admin",
+        "ty": "Admin",
+        "default_settings": null,
+        "permissions": {
+            "allow_add_hosts": true,
+            "maximum_bitrate_kbps": null,
+            "allow_codec_h264": true,
+            "allow_codec_h265": true,
+            "allow_codec_av1": true,
+            "allow_hdr": true,
+            "allow_transport_webrtc": true,
+            "allow_transport_websockets": true
+        }
+    }
+}
+
+    res.json();
 });
 
     // --- WebSocket Server Code ---
