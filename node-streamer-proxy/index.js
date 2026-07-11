@@ -3094,49 +3094,121 @@ var http_obj = require('http').Server(app);
 					  }
 					}
 					
+					
+					/* var obj=JSON.parse(JSON.stringify(fwsfsg))
+						
+						obj.client_private_key.contents="....."
+						obj.client_certificate.contents="....."
+						obj.server_certificate.contents="....." */
 					// --- LOG: Sending Init ---
 				// NOTE: Redact secrets in production!
-				console.log(`[Stream]: Sending Init to streamer: ${JSON.stringify(fwsfsg, null, 2)}`);
+				//console.log(`[Stream]: Sending Init to streamer: ${JSON.stringify(obj, null, 2)}`);
+				console.log(`[Stream]: Sending Init to streamer:`);
 
 
 					var fsgsg=JSON.stringify(fwsfsg) + '\n'
 					
-					console.warn('streamer.stdin.write fsgsg :',fwsfsg);
-					
-					streamer.stdin.write(fsgsg);
+							console.warn('streamer.stdin.write fsgsg :',fwsfsg);
+							
+							streamer.stdin.write(fsgsg);
 
-					// 5. IPC Handling: Streamer Stdout -> WebSocket
-					streamer.stdout.on('data', (chunk) => {
-						
-						console.warn('Streamer -> ws chunk :', chunk.toString('utf8'));
-						
-						//Streamer -> ws chunk : {"WebSocket":{"DebugLog":{"message":"Completed Stage: Launch Streamer","ty":null}}}
-						
-						// Assuming streamer sends JSON IPC messages
-						// You may need to parse stream chunks if they are not newline-delimited
-						 //if (ws.readyState === WebSocket.OPEN) 
-							 ws.send(chunk);
-						
-						//ws.send(chunk); 
-					});
+							// 5. IPC Handling: Streamer Stdout -> WebSocket
+							streamer.stdout.on('data', (chunk) => {
+								
+								console.warn('Streamer -> ws chunk :', chunk.toString('utf8'));
+								
+								//Streamer -> ws chunk : {"WebSocket":{"DebugLog":{"message":"Completed Stage: Launch Streamer","ty":null}}}
+								
+								// Assuming streamer sends JSON IPC messages
+								// You may need to parse stream chunks if they are not newline-delimited
+								 //if (ws.readyState === WebSocket.OPEN) 
+									 ws.send(chunk);
+								
+								//ws.send(chunk); 
+							});
 
 
-				streamer.stderr.on('data', (err) => {
-                // --- LOG: Streamer Stderr ---
-                console.error(`[Streamer Stderr]: ${err.toString()}`);
-            });
+							streamer.stderr.on('data', (err) => {
+								// --- LOG: Streamer Stderr ---
+								console.error(`[Streamer Stderr]: ${err.toString()}`);
+							});
+							
 					// 6. WebSocket -> Streamer Stdin
-					ws.on('message', (message1) => 
+					ws.on('message', (message1,isBinary) => 
 					{
+						console.log('webpage-> ss message Received');
 						
-						if(message1)
-						{
-							console.log('Received:', message1.toString());
-							// Forward WS traffic to streamer process
-							streamer.stdin.write(message1);
-						}
-						else 
-							console.warn('ws -> Streamer undefined message:');
+						  if (!streamer) 
+						  {
+								// ... (Your existing Init logic stays here) ...
+								console.error('webpage-> ss streamer undefined ');
+						  } 
+						  else 
+						  {
+							  
+								if(message1)
+								{
+									
+									console.log('webpage-> ss message1 :', message1.toString());
+									// --- NEW RELAY LOGIC ---
+										if (streamer.stdin.writable) 
+										{
+											console.log('webpage-> ss message1 getting send to streamer ');
+											let payload;
+
+											if (isBinary) 
+											{
+												// 1. Create a human-readable Hex string of the first 16 bytes
+												const hexPreview = message
+													.slice(0, 16) // Take only the first 16 bytes to avoid console lag
+													.toString('hex') // Convert to hex string (e.g., "0a1b2c")
+													.match(/../g) // Split into pairs (e.g., ["0a", "1b", "2c"])
+													?.join(' ') || ''; // Join with spaces (e.g., "0a 1b 2c")
+												
+												console.log(`[Stream -> WS]: Binary packet received | Size: ${message.length} bytes | Preview: [ ${hexPreview} ... ]`);
+			
+												const encode = {
+													webSocket: (msg) => ({ WebSocket: msg }),
+													// Converts Node Buffer into an array of integers [u8]
+													transport: (buf) => ({ WebSocketTransport: [...buf] }), 
+												};
+
+												// If it's binary data (like WebRTC transport), wrap it as an array of bytes
+												payload = encode.transport(message);
+											} 
+											else 
+											{
+												// If it's text data, parse it and wrap it in the WebSocket envelope
+												try 
+												{
+													const parsedMsg = JSON.parse(message.toString());
+													payload = encode.webSocket(parsedMsg);
+												} 
+												catch (e) 
+												{
+													console.warn("[Stream]: Invalid JSON from client during relay, dropping message");
+													return; // Skip sending invalid data
+												}
+											}
+											
+											
+											console.log('payload :', payload);
+											// The streamer requires newline-delimited JSON
+											streamer.stdin.write(JSON.stringify(payload) + '\n');
+										}
+										else 
+											console.error('webpage-> ss streamer.stdin.writable->false  ');
+											
+									console.log('message1 :', message1);
+									// Forward WS traffic to streamer process
+									streamer.stdin.write(message1);
+								}
+								else 
+									console.warn('webpage-> ss undefined message');
+						
+								
+						   }
+	
 					});
 
 					// Cleanup on close
