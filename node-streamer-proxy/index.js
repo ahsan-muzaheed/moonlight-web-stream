@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const http = require('http'); // Required for WebSocket integration
 const WebSocket = require('ws'); // Ensure 'ws' is installed via npm
-
+const readline = require("readline");
 // Matching the configuration from the Actix logs
 const numWorkers = 1; 
 const PORT = 8080;
@@ -133,121 +133,44 @@ var http_obj = require('http').Server(app);
 		wss.on('connection', (ws, request) => {
 			console.log('Client connected to /host/stream');
 			
-			// 1. Initial Handshake: Wait for the first "Init" message
-			ws.once('message', async (data) => {
-				try {
-                    var fsgsg=data.toString()
-					
-					console.log("page-> ws message :"+fsgsg);
-					
-					
-					const parsed = JSON.parse(fsgsg);
+			// MAKE SURE THIS IS AT THE TOP OF YOUR FILE:
+// const readline = require('readline');
 
-                    const initData = parsed.Init
-					//if (initData.type !== 'Init') 
-                    if (parsed && parsed.Init)    
-                    {
-						
-						 // --- LOG: Init Received ---
+// 1. Initial Handshake: Wait for the first "Init" message
+ws.once('message', async (data) => {
+    try {
+        var fsgsg = data.toString()
+        console.log("page-> ws message :" + fsgsg);
+        
+        const parsed = JSON.parse(fsgsg);
+        const initData = parsed.Init
+
+        if (parsed && parsed.Init) {
+            // --- LOG: Init Received ---
             console.log(`[Stream]: Received Init message for host: ${initData.host_id || 'UNKNOWN_HOST'}, app: ${initData.app_id || 'UNKNOWN_APP'}`);
-
             console.log(`[Stream]: spawning streamer process: streamer_path=${STREAMER_PATH}, cwd=${process.cwd()}`);
+        } else {
+            console.warn("Expected Init message, closing connection");
+            ws.close();
+            return;
+        }
 
-						
-						
-					}
-                    else
-                    {
-						console.warn("Expected Init message, closing connection");
-						ws.close();
-						return;
-					}
+        // 2. Dummy Placeholders for DB/Auth lookups
+        const hostData = await getHostDataFromDB(initData.host_id);
+        const app = await getAppFromHost(hostData, initData.app_id);
+        const pairInfo = await getPairInfo(hostData);
 
-					// 2. Dummy Placeholders for DB/Auth lookups
-					const hostData = await getHostDataFromDB(initData.host_id);
-					const app = await getAppFromHost(hostData, initData.app_id);
-					const pairInfo = await getPairInfo(hostData);
+        // 3. Spawn the Streamer Process
+        const streamer = spawn(STREAMER_PATH, [], {
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
 
-					// 3. Spawn the Streamer Process
-					const streamer = spawn(STREAMER_PATH, [], {
-						stdio: ['pipe', 'pipe', 'pipe']
-					});
+        if (streamer.pid) {
+            console.log(`[Stream]: Streamer spawned successfully with PID: ${streamer.pid}`);
+        } else {
+            console.error("[Stream]: FAILED to spawn streamer process");
+        }
 
-					console.log(`Streamer spawned with PID: ${streamer.pid}`);
-					if (streamer.pid) {
-                console.log(`[Stream]: Streamer spawned successfully with PID: ${streamer.pid}`);
-            } else {
-                console.error("[Stream]: FAILED to spawn streamer process");
-            }
-
-				/* 
-								 let init = ServerIpcMessage::Init {
-											config: StreamerConfig {
-												webrtc: web_app.config().webrtc.clone(),
-												log_level: web_app.config().log.level_filter,
-											},
-											host_address: address,
-											host_http_port: http_port,
-											client_unique_id: Some(client_unique_id),
-											client_private_key: pair_info.client_private_key,
-											client_certificate: pair_info.client_certificate,
-											server_certificate: pair_info.server_certificate,
-											app_id: app_id.0,
-											demo_param,
-											video_frame_queue_size,
-											audio_sample_queue_size,
-											permissions,
-										};
-								// 4. Send Initial Config to Streamer via Stdin
-				 
-				 
-								 let obj11 = ServerIpcMessage::Init {
-									 
-											config: StreamerConfig {
-												webrtc: web_app.config().webrtc.clone(),
-												log_level: "Info",
-											},
-											
-											
-											host_address: "localhost",
-											host_http_port: 47989,
-											client_unique_id: "abc",
-											
-											
-											client_private_key: pair_info.client_private_key,
-											client_certificate: pair_info.client_certificate,
-											server_certificate: pair_info.server_certificate,
-											app_id: 1551091393,
-											demo_param:None,
-											video_frame_queue_size:3,
-											audio_sample_queue_size:20,
-											
-											permissions:parsed.Init.role.permissions,
-										};
-				 
-					const serverIpcInit = {
-						type: 'Init',
-						config: APP_CONFIG,
-						host_address: hostData.address,
-						// ... map other fields from your Rust Init struct
-					};
-					
-					const keyPath = path.join(__dirname, `../${config_universal.sslKeyFilePath}`);
-					const certPath = path.join(__dirname, `../${config_universal.sslCertFilePath}`);
-					console.log("keyPath: "+keyPath);
-					console.log("certPath: "+certPath);
-					if (config.UseHTTPS) {
-						//HTTPS certificate details
-						ssCertOptions = {
-							key: fs.readFileSync(keyPath),
-							cert: fs.readFileSync(certPath)
-						};	
-					
-					 */
-
-
-				 
-					 
 					var fwsfsg={
 					  "Init": {
 						"config": {
@@ -3093,141 +3016,132 @@ var http_obj = require('http').Server(app);
 						}
 					  }
 					}
-					
-					
-					/* var obj=JSON.parse(JSON.stringify(fwsfsg))
-						
-						obj.client_private_key.contents="....."
-						obj.client_certificate.contents="....."
-						obj.server_certificate.contents="....." */
-					// --- LOG: Sending Init ---
-				// NOTE: Redact secrets in production!
-				//console.log(`[Stream]: Sending Init to streamer: ${JSON.stringify(obj, null, 2)}`);
-				console.log(`[Stream]: Sending Init to streamer:`);
+				
+        // --- LOG: Sending Init ---
+        console.log(`[Stream]: Sending Init to streamer:`);
 
+        var fsgsg = JSON.stringify(fwsfsg) + '\n'
+        console.warn('streamer.stdin.write fsgsg :', fwsfsg);
+        streamer.stdin.write(fsgsg);
 
-					var fsgsg=JSON.stringify(fwsfsg) + '\n'
-					
-							console.warn('streamer.stdin.write fsgsg :',fwsfsg);
-							
-							streamer.stdin.write(fsgsg);
+        // 5. IPC Handling: Streamer Stdout -> WebSocket via Readline
+        readline.createInterface({ input: streamer.stdout }).on('line', (line) => {
+            if (!line) return;
 
-							// 5. IPC Handling: Streamer Stdout -> WebSocket
-							streamer.stdout.on('data', (chunk) => {
-								
-								console.warn('Streamer -> ws chunk :', chunk.toString('utf8'));
-								
-								//Streamer -> ws chunk : {"WebSocket":{"DebugLog":{"message":"Completed Stage: Launch Streamer","ty":null}}}
-								
-								// Assuming streamer sends JSON IPC messages
-								// You may need to parse stream chunks if they are not newline-delimited
-								 //if (ws.readyState === WebSocket.OPEN) 
-									 ws.send(chunk);
-								
-								//ws.send(chunk); 
-							});
+            let obj;
+            try {
+                obj = JSON.parse(line);
+            } catch {
+                console.warn("[Stream][stdout] invalid JSON line:", line);
+                return;
+            }
 
+            if (ws.readyState !== WebSocket.OPEN) {
+                console.warn(
+                    `[Stream][skip] ws not open (readyState=${ws.readyState}), dropping:`,
+                    (obj && Object.keys(obj)[0]) ?? obj
+                );
+                return;
+            }
 
-							streamer.stderr.on('data', (err) => {
-								// --- LOG: Streamer Stderr ---
-								console.error(`[Streamer Stderr]: ${err.toString()}`);
-							});
-							
-					// 6. WebSocket -> Streamer Stdin
-					ws.on('message', (message1,isBinary) => 
-					{
-						console.log('webpage-> ss message Received');
-						
-						  if (!streamer) 
-						  {
-								// ... (Your existing Init logic stays here) ...
-								console.error('webpage-> ss streamer undefined ');
-						  } 
-						  else 
-						  {
-							  
-								if(message1)
-								{
-									
-									console.log('webpage-> ss message1 :', message1.toString());
-									// --- NEW RELAY LOGIC ---
-										if (streamer.stdin.writable) 
-										{
-											console.log('webpage-> ss message1 getting send to streamer ');
-											let payload;
+            if (obj && obj.WebSocket) {
+                const text = JSON.stringify(obj.WebSocket);
+                console.log(`[Stream][->client TEXT] ${text.slice(0, 200)}`);
+                ws.send(text, (err) => {
+                    if (err) console.warn("[Stream] send error (TEXT):", err.message);
+                });
+            } else if (obj && obj.WebSocketTransport) {
+                const buf = Buffer.from(obj.WebSocketTransport);
+                console.log(`[Stream][->client BIN ] ${buf.length} bytes relayed`);
+                ws.send(buf, { binary: true }, (err) => {
+                    if (err) console.warn("[Stream] send error (BIN):", err.message);
+                });
+            } else if (obj === "Stop") {
+                console.log("[Stream][->client] Streamer requested Stop, closing ws");
+                ws.close();
+            } else {
+                console.warn("[Stream][?] unknown envelope:", JSON.stringify(obj).slice(0, 200));
+            }
+        });
 
-											if (isBinary) 
-											{
-												// 1. Create a human-readable Hex string of the first 16 bytes
-												const hexPreview = message
-													.slice(0, 16) // Take only the first 16 bytes to avoid console lag
-													.toString('hex') // Convert to hex string (e.g., "0a1b2c")
-													.match(/../g) // Split into pairs (e.g., ["0a", "1b", "2c"])
-													?.join(' ') || ''; // Join with spaces (e.g., "0a 1b 2c")
-												
-												console.log(`[Stream -> WS]: Binary packet received | Size: ${message.length} bytes | Preview: [ ${hexPreview} ... ]`);
-			
-												const encode = {
-													webSocket: (msg) => ({ WebSocket: msg }),
-													// Converts Node Buffer into an array of integers [u8]
-													transport: (buf) => ({ WebSocketTransport: [...buf] }), 
-												};
+        streamer.stderr.on('data', (err) => {
+            // --- LOG: Streamer Stderr ---
+            console.error(`[Streamer Stderr]: ${err.toString()}`);
+        });
 
-												// If it's binary data (like WebRTC transport), wrap it as an array of bytes
-												payload = encode.transport(message);
-											} 
-											else 
-											{
-												// If it's text data, parse it and wrap it in the WebSocket envelope
-												try 
-												{
-													const parsedMsg = JSON.parse(message.toString());
-													payload = encode.webSocket(parsedMsg);
-												} 
-												catch (e) 
-												{
-													console.warn("[Stream]: Invalid JSON from client during relay, dropping message");
-													return; // Skip sending invalid data
-												}
-											}
-											
-											
-											console.log('payload :', payload);
-											// The streamer requires newline-delimited JSON
-											streamer.stdin.write(JSON.stringify(payload) + '\n');
-										}
-										else 
-											console.error('webpage-> ss streamer.stdin.writable->false  ');
-											
-									console.log('message1 :', message1);
-									// Forward WS traffic to streamer process
-									streamer.stdin.write(message1);
-								}
-								else 
-									console.warn('webpage-> ss undefined message');
-						
-								
-						   }
-	
-					});
+        // 6. WebSocket -> Streamer Stdin
+        ws.on('message', (message1, isBinary) => {
+            console.log('webpage-> ss message Received');
+            
+            if (!streamer) {
+                console.error('webpage-> ss streamer undefined ');
+            } else {
+                if (message1) {
+                    // --- NEW RELAY LOGIC ---
+                    if (streamer.stdin.writable) {
+                        let payload;
 
-					// Cleanup on close
-					ws.on('close', () => {
-					
-						console.log("WS closed, killing streamer...");
-						streamer.kill();
-					});
+                        if (isBinary) {
+                            // 1. Create a human-readable Hex string of the first 16 bytes
+                            // NOTE: changed 'message' to 'message1' here
+                            const hexPreview = message1
+                                .slice(0, 16) 
+                                .toString('hex') 
+                                .match(/../g) 
+                                ?.join(' ') || ''; 
+                            
+                            console.log(`[Stream -> WS]: Binary packet received | Size: ${message1.length} bytes | Preview: [ ${hexPreview} ... ]`);
 
-					streamer.on('exit', () => {
-						console.log("Streamer process exited");
-						ws.close();
-					});
+                            const encode = {
+                                webSocket: (msg) => ({ WebSocket: msg }),
+                                transport: (buf) => ({ WebSocketTransport: [...buf] }), 
+                            };
 
-				} catch (err) {
-					console.error("Initialization error:", err);
-					ws.close();
-				}
-			});
+                            payload = encode.transport(message1);
+                        } else {
+                            try {
+                                const parsedMsg = JSON.parse(message1.toString());
+                                const encode = { webSocket: (msg) => ({ WebSocket: msg }) };
+                                payload = encode.webSocket(parsedMsg);
+                            } catch (e) {
+                                console.warn("[Stream]: Invalid JSON from client during relay, dropping message");
+                                return; 
+                            }
+                        }
+                        
+                        console.log('payload :', JSON.stringify(payload).slice(0, 200)); // Sliced to prevent console flood
+                        
+                        // Write the properly wrapped payload to the streamer
+                        streamer.stdin.write(JSON.stringify(payload) + '\n');
+                        
+                        // REMOVED: streamer.stdin.write(message1); <- This would corrupt the stream
+                    } else {
+                        console.error('webpage-> ss streamer.stdin.writable->false  ');
+                    }
+                } else {
+                    console.warn('webpage-> ss undefined message');
+                }
+            }
+        });
+
+        // Cleanup on close
+        ws.on('close', () => {
+            console.log("WS closed, killing streamer...");
+            if (streamer) streamer.kill();
+        });
+
+        streamer.on('exit', () => {
+            console.log("Streamer process exited");
+            ws.close();
+        });
+
+    } catch (err) {
+        console.error("Initialization error:", err);
+        ws.close();
+    }
+});
+		
+		
 		});
 		   
    // --- End WebSocket Server Code ---
