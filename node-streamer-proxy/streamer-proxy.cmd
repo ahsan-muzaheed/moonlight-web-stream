@@ -15,6 +15,6 @@ if "%REAL_STREAMER_PATH%"=="" set "REAL_STREAMER_PATH=%~dp0..\target\debug\strea
 REM --- Where the proxy writes its IPC log ---
 if "%PROXY_LOG_FILE%"=="" set "PROXY_LOG_FILE=%~dp0ipc-proxy.log"
 
-node "%~dp0index.js" "%REAL_STREAMER_PATH%"
+node "%~dp0streamer-proxy.js" "%REAL_STREAMER_PATH%"
 
 pause
