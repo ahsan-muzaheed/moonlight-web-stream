@@ -100,9 +100,18 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
   };
 }
 
+// Cancels scheduled but not yet fired, keyed by host id. Lets a quick reconnect
+// abort the pending teardown instead of losing the session to a network blip.
+const pendingCancels = new Map();
+
 function registerStreamRoutes(app, ctx) {
   const streamerPath = ctx.config.streamer.path;
   const logLevel = ctx.config.streamer.log_level;
+
+  // Free the host for the next user when a stream drops.
+  // grace secs = 0 -> cancel immediately on disconnect.
+  const cancelOnDisconnect = ctx.config.streamer.cancel_app_on_disconnect !== false;
+  const graceSecs = ctx.config.streamer.cancel_grace_secs ?? 10;
 
   app.ws("/api/host/stream", (ws, req) => {
     // Same auth as the REST routes; the streamer must only run for a real user.
@@ -113,6 +122,7 @@ function registerStreamRoutes(app, ctx) {
     }
 
     let streamer = null;
+    let activeHost = null; // captured at Init, needed by the close handler
 
     const sendClientText = (inner) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(inner));
@@ -162,6 +172,15 @@ function registerStreamRoutes(app, ctx) {
         return ws.close();
       }
 
+      // Reconnecting to a host whose teardown is still pending? Abort it.
+      activeHost = ctx.storage.getHost(init.host_id);
+      const pending = pendingCancels.get(String(init.host_id));
+      if (pending) {
+        clearTimeout(pending);
+        pendingCancels.delete(String(init.host_id));
+        console.log(`[Stream] reconnect to host ${init.host_id}, pending cancel aborted`);
+      }
+
       // Tell the client which app is launching (Rust sends UpdateApp here).
       sendClientText({ UpdateApp: { app: built.app } });
 
@@ -188,6 +207,35 @@ function registerStreamRoutes(app, ctx) {
 
     ws.on("close", () => {
       if (streamer) streamer.stop();
+
+      // Killing the streamer only drops the Moonlight client; Sunshine keeps the
+      // app running so it can be resumed. Explicitly cancel to free the machine.
+      if (!cancelOnDisconnect || !activeHost) return;
+
+      const hostKey = String(activeHost.id);
+      if (pendingCancels.has(hostKey)) return; // already scheduled
+
+      const fire = async () => {
+        pendingCancels.delete(hostKey);
+        try {
+          // Re-read: pairInfo may have changed since Init.
+          const host = ctx.storage.getHost(activeHost.id);
+          if (!host) return;
+          await moonlight.cancelApp(host, user.hostUniqueId);
+          console.log(`[Stream] app cancelled on host ${hostKey}, machine freed`);
+        } catch (err) {
+          console.warn(`[Stream] cancel failed on host ${hostKey}:`, err.message);
+        }
+      };
+
+      if (graceSecs > 0) {
+        console.log(
+          `[Stream] client gone; cancelling app on host ${hostKey} in ${graceSecs}s unless it reconnects`
+        );
+        pendingCancels.set(hostKey, setTimeout(fire, graceSecs * 1000));
+      } else {
+        fire();
+      }
     });
   });
 }
