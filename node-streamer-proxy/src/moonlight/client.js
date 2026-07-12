@@ -22,7 +22,7 @@ function httpsPortOf(httpPort) {
 }
 
 /** GET returning the raw body. `pairInfo` present => HTTPS + client cert. */
-function request(host, path, { pairInfo = null, binary = false } = {}) {
+function request(host, path, { pairInfo = null, binary = false, timeout = 10000 } = {}) {
   const useTls = !!pairInfo;
   const port = useTls ? httpsPortOf(host.httpPort) : host.httpPort;
   const scheme = useTls ? https : http;
@@ -32,7 +32,7 @@ function request(host, path, { pairInfo = null, binary = false } = {}) {
     port,
     path,
     method: "GET",
-    timeout: 10000,
+    timeout,
   };
 
   if (useTls) {
@@ -54,7 +54,11 @@ function request(host, path, { pairInfo = null, binary = false } = {}) {
 
     req.on("timeout", () => {
       req.destroy();
-      reject(new Error(`timeout contacting ${host.address}:${port}`));
+      reject(
+        new Error(
+          `timeout after ${timeout}ms contacting ${host.address}:${port} (path ${path.split("?")[0]})`
+        )
+      );
     });
     req.on("error", reject);
     req.end();
@@ -103,6 +107,8 @@ async function serverInfo(host, uniqueId) {
  * !! UNVERIFIED. The hash/ordering below follows moonlight-common-c, but the
  *    exact byte layout is easy to get subtly wrong. Expect to debug this. !!
  */
+const PIN_ENTRY_TIMEOUT = 120000; // 2 min for the user to type the PIN into Sunshine
+
 async function pair(host, uniqueId, pin) {
   const client = c.generateClientCertificate();
   const salt = c.randomSalt();
@@ -119,7 +125,9 @@ async function pair(host, uniqueId, pin) {
         phrase: "getservercert",
         salt: salt.toString("hex").toUpperCase(),
         clientcert: c.pemToHex(client.certificate),
-      })}`
+      })}`,
+      // Sunshine holds this request open until the PIN is entered.
+      { timeout: PIN_ENTRY_TIMEOUT }
     )
   );
 
