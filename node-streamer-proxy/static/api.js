@@ -40,42 +40,11 @@ export function getApi() {
         }
         let newApi;
         while (true) {
-			
-			
             const api = yield tryLogin();
             if (api) {
                 newApi = api;
                 break;
-            } 
-			
-			
-			/* 
-				//auto login
-				
-					const host_url = buildUrl("/api");
-					let api = { host_url, bearer: null, user: null, role: null };
-				
-							const userAuth = {
-						name: "abc",
-						password: "abc"
-					};
-
-					 if (yield apiLogin(api, userAuth)) 
-					 {
-						if (!(yield apiAuthenticate(api))) {
-							showNotification("Login was successful but authentication doesn't work!");
-						}
-						newApi = api;
-					}
-					else {
-						yield showMessage("Credentials are not Valid");
-						newApi = null;
-					}
-					break; 
-				
-				//auto login
-			*/
-		
+            }
         }
         return newApi;
     });
