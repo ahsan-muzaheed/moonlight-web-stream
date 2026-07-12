@@ -19,3 +19,4 @@ web/api_bindings.ts
 node-streamer-proxy/ipc-proxy.log
 ipc-proxy.log
 /dist1
+package-lock.json
