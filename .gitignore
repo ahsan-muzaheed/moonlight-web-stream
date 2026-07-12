@@ -16,3 +16,5 @@ web/api_bindings.ts
 #server
 
 /.idea
+node-streamer-proxy/ipc-proxy.log
+ipc-proxy.log
