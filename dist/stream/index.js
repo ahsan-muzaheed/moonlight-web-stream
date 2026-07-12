@@ -709,10 +709,6 @@ export class Stream {
     }
     sendWsMessage(message) {
         const raw = JSON.stringify(message);
-		
-		//console.log(`sendWsMessage(): `, message);
-		console.log(`sendWsMessage(): `, raw);
-		
         if (this.ws.readyState == WebSocket.OPEN) {
             this.ws.send(raw);
         }
@@ -720,62 +716,13 @@ export class Stream {
             this.wsSendBuffer.push(raw);
         }
     }
-    onRawWsMessage111(event) {
+    onRawWsMessage(event) {
         const message = event.data;
-		
-		console.warn('ss->webpage message:',message);
-		console.warn('ss->webpage typeof message:',typeof message);
-        if (typeof message == "string") 
-		{
+        if (typeof message == "string") {
             const json = JSON.parse(message);
             this.onMessage(json);
         }
     }
-	
-	onRawWsMessage(event) {
-        const message = event.data;
-        
-        console.warn('ss->webpage typeof message:', typeof message);
-
-        if (typeof message === "string") {
-            console.warn('ss->webpage message (Text):', message);
-            const json = JSON.parse(message);
-            this.onMessage(json);
-        } else {
-			
-			console.warn('ss->webpage chunk message :', message.toString('utf8'));
-			
-            // Handle ArrayBuffer
-            if (message instanceof ArrayBuffer) {
-                const bytes = new Uint8Array(message);
-                // Create a hex preview of the first 16 bytes
-                const hexPreview = Array.from(bytes.slice(0, 16))
-                    .map(b => b.toString(16).padStart(2, '0'))
-                    .join(' ');
-                
-                console.warn(`ss->webpage message (ArrayBuffer) | Size: ${bytes.length} bytes`);
-                console.warn(`Preview: [ ${hexPreview} ... ]`);
-            } 
-            // Handle Blob
-            else if (message instanceof Blob) {
-                console.warn(`ss->webpage message (Blob) | Size: ${message.size} bytes`);
-                
-                // Blobs need to be read asynchronously to see their contents
-                message.arrayBuffer().then(buffer => {
-                    const bytes = new Uint8Array(buffer);
-                    const hexPreview = Array.from(bytes.slice(0, 16))
-                        .map(b => b.toString(16).padStart(2, '0'))
-                        .join(' ');
-                    console.warn(`Blob Preview: [ ${hexPreview} ... ]`);
-                });
-            } 
-            // Fallback for standard JSON objects (if another part of your app passes them directly)
-            else {
-                console.warn('ss->webpage message (Object):', JSON.stringify(message, null, 2));
-            }
-        }
-    }
-	
     stop() {
         if (!this.sendGeneralMessage("Stop")) {
             return Promise.resolve(false);
