@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "users": {
+    "4cbcedf5-0c3e-4e11-b888-68e6cf910b66": {
+      "id": "4cbcedf5-0c3e-4e11-b888-68e6cf910b66",
+      "name": "abc",
+      "password": {
+        "salt": "cGMRwxdTCOm4Dqq+VNoZ7g==",
+        "hash": "PAKUtS9G9E5UZpTUkEwuWsl7zfF9JIsjY8YMCVE5hss=",
+        "iterations": 600000
+      },
+      "roleId": "admin",
+      "hostUniqueId": "e7cb41eeac422b34"
+    }
+  },
+  "roles": {
+    "admin": {
+      "id": "admin",
+      "name": "Admin",
+      "ty": "Admin",
+      "defaultSettings": {},
+      "permissions": {
+        "allow_add_hosts": true,
+        "maximum_bitrate_kbps": null,
+        "allow_codec_h264": true,
+        "allow_codec_h265": true,
+        "allow_codec_av1": true,
+        "allow_hdr": true,
+        "allow_transport_webrtc": true,
+        "allow_transport_websockets": true
+      }
+    },
+    "user": {
+      "id": "user",
+      "name": "User",
+      "ty": "User",
+      "defaultSettings": {},
+      "permissions": {
+        "allow_add_hosts": true,
+        "maximum_bitrate_kbps": null,
+        "allow_codec_h264": true,
+        "allow_codec_h265": true,
+        "allow_codec_av1": true,
+        "allow_hdr": true,
+        "allow_transport_webrtc": true,
+        "allow_transport_websockets": true
+      }
+    }
+  },
+  "hosts": {
+    "6a02bb84-02be-4be4-804f-9759696c6700": {
+      "id": "6a02bb84-02be-4be4-804f-9759696c6700",
+      "address": "0.0.0.0",
+      "httpPort": 8080,
+      "ownerId": "4cbcedf5-0c3e-4e11-b888-68e6cf910b66",
+      "pairInfo": null,
+      "cache": null
+    },
+    "46048901-ae63-440d-ad35-7f4de63f207d": {
+      "id": "46048901-ae63-440d-ad35-7f4de63f207d",
+      "address": "172.7.191.71",
+      "httpPort": 8080,
+      "ownerId": "4cbcedf5-0c3e-4e11-b888-68e6cf910b66",
+      "pairInfo": null,
+      "cache": null
+    }
+  },
+  "sessions": {
+    "G8HkF0smEpNqTJYiJegFyb2OxnbzE6y7ZTul1g1erZg": {
+      "userId": "4cbcedf5-0c3e-4e11-b888-68e6cf910b66",
+      "expiresAt": 1784437138998
+    },
+    "ILsoRyEvg7GyyoAAVk0sQpkAQ19XZ-UxeaElBHUIS9M": {
+      "userId": "4cbcedf5-0c3e-4e11-b888-68e6cf910b66",
+      "expiresAt": 1784437203690
+    }
+  }
+}

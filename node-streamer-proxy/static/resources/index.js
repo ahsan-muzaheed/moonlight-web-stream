@@ -1,0 +1,10 @@
+import { buildUrl } from "../config_.js";
+export const HOST_IMAGE = buildUrl("/resources/desktop_windows-48px.svg");
+export const HOST_OVERLAY_NONE = "";
+export const HOST_OVERLAY_OFFLINE = buildUrl("/resources/baseline-error_outline-24px.svg");
+export const HOST_OVERLAY_LOCK = buildUrl("/resources/baseline-lock-24px.svg");
+export const INFO_IMAGE = buildUrl("/resources/new/info_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg");
+export const WARN_IMAGE = buildUrl("/resources/baseline-warning-24px.svg");
+export const ERROR_IMAGE = buildUrl("/resources/baseline-error_outline-24px.svg");
+export const APP_NO_IMAGE = buildUrl("/resources/no_app_image.png");
+export const LOGOUT_IMAGE = buildUrl("/resources/new/logout-svgrepo-com.svg");

@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "users": {
+    "1": {
+      "id": 1,
+      "name": "v",
+      "password": {
+        "salt": "BTwBIsPMVj/FzJtuGSdpWA==",
+        "hash": "tWmKnRJNp+3zuvVRxg2U7SfhU/A8qKFuOBf8WNIHZbA=",
+        "iterations": 600000
+      },
+      "roleId": 1,
+      "hostUniqueId": "884cfcbc466af5bf"
+    }
+  },
+  "roles": {
+    "1": {
+      "id": 1,
+      "name": "Admin",
+      "ty": "Admin",
+      "defaultSettings": {},
+      "permissions": {
+        "allow_add_hosts": true,
+        "maximum_bitrate_kbps": null,
+        "allow_codec_h264": true,
+        "allow_codec_h265": true,
+        "allow_codec_av1": true,
+        "allow_hdr": true,
+        "allow_transport_webrtc": true,
+        "allow_transport_websockets": true
+      }
+    },
+    "2": {
+      "id": 2,
+      "name": "User",
+      "ty": "User",
+      "defaultSettings": {},
+      "permissions": {
+        "allow_add_hosts": true,
+        "maximum_bitrate_kbps": null,
+        "allow_codec_h264": true,
+        "allow_codec_h265": true,
+        "allow_codec_av1": true,
+        "allow_hdr": true,
+        "allow_transport_webrtc": true,
+        "allow_transport_websockets": true
+      }
+    }
+  },
+  "hosts": {
+    "1": {
+      "id": 1,
+      "address": "172.7.191.71",
+      "httpPort": 47989,
+      "ownerId": 1,
+      "pairInfo": null,
+      "cache": null
+    }
+  },
+  "sessions": {
+    "wuQcCH7NCS8zv5tdIbq4rO8SGhBcw3I5mCWV6ATiYjg": {
+      "userId": 1,
+      "expiresAt": 1784440103685
+    }
+  },
+  "nextIds": {
+    "user": 2,
+    "role": 3,
+    "host": 2
+  }
+}
