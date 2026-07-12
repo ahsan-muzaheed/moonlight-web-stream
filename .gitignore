@@ -18,3 +18,4 @@ web/api_bindings.ts
 /.idea
 node-streamer-proxy/ipc-proxy.log
 ipc-proxy.log
+/dist1
