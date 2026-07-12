@@ -162,7 +162,8 @@ ws.once('message', async (data) => {
 
         // 3. Spawn the Streamer Process
         const streamer = spawn(STREAMER_PATH, [], {
-            stdio: ['pipe', 'pipe', 'pipe']
+            stdio: ['pipe', 'pipe', 'pipe'],
+			 env: { ...process.env, RUST_LOG: "debug" },
         });
 
         if (streamer.pid) {
