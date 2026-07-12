@@ -33,10 +33,24 @@ function generateClientCertificate() {
 
   cert.sign(keys.privateKey, forge.md.sha256.create());
 
+  // Rust's rustls/awc backend only accepts PKCS#8 (BEGIN PRIVATE KEY).
+  // node-forge emits PKCS#1 (BEGIN RSA PRIVATE KEY), so convert.
+  const pkcs1 = forge.pki.privateKeyToPem(keys.privateKey);
+
   return {
     certificate: forge.pki.certificateToPem(cert),
-    privateKey: forge.pki.privateKeyToPem(keys.privateKey),
+    privateKey: toPkcs8(pkcs1),
   };
+}
+
+/**
+ * Normalize any RSA private key PEM to PKCS#8 (BEGIN PRIVATE KEY), and to LF
+ * line endings. Accepts PKCS#1 or PKCS#8 in; always returns PKCS#8.
+ * Used both at generation time and when reading keys that were stored earlier.
+ */
+function toPkcs8(pem) {
+  const key = crypto.createPrivateKey(pem);
+  return key.export({ type: "pkcs8", format: "pem" }).replace(/\r\n/g, "\n");
 }
 
 /** A 4-digit PIN, as shown to the user and typed into Sunshine. */
@@ -122,6 +136,7 @@ function hexToPem(hex) {
 
 module.exports = {
   generateClientCertificate,
+  toPkcs8,
   randomPin,
   randomSalt,
   deriveAesKey,

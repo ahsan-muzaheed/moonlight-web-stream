@@ -5,6 +5,7 @@ const readline = require("readline");
 const WebSocket = require("ws");
 const { resolveUser } = require("../auth");
 const moonlight = require("../moonlight/client");
+const { toPkcs8 } = require("../moonlight/crypto");
 
 /**
  * The signaling relay + streamer lifecycle.
@@ -87,7 +88,7 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
       host_address: host.address,
       host_http_port: host.httpPort,
       client_unique_id: user.hostUniqueId,
-      client_private_key: host.pairInfo.clientPrivateKey,
+      client_private_key: toPkcs8(host.pairInfo.clientPrivateKey),
       client_certificate: host.pairInfo.clientCertificate,
       server_certificate: host.pairInfo.serverCertificate,
       app_id: Number(appId),
