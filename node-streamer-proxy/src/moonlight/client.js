@@ -249,6 +249,24 @@ async function pair(host, uniqueId, pin) {
   return pairInfo;
 }
 
+/**
+ * Tell Sunshine to end the current session and terminate the running app.
+ * Sunshine registers ^/cancel$ on the HTTPS (47984) server, so this needs
+ * the client cert. Without this call Sunshine deliberately keeps the app
+ * alive after a stream drops, so you can reconnect and resume it.
+ */
+async function cancelApp(host, uniqueId) {
+  if (!host.pairInfo) throw new Error("HostNotPaired");
+
+//curl -b cookies.txt -H "Content-Type: application/json" -d "{\"host_id\":1}" http://172.7.191.71:8080/api/host/cancel
+//{"success":true}
+  const xml = await request(host, `/cancel?${query(baseParams(uniqueId))}`, {
+    pairInfo: host.pairInfo,
+  });
+  const parsed = await parseXml(xml);
+  return parsed.cancel === "1" || parsed.$?.status_code === "200";
+}
+
 /** Tell the host to forget us. */
 async function unpair(host, uniqueId) {
   return request(host, `/unpair?${query(baseParams(uniqueId))}`);
@@ -290,4 +308,4 @@ async function appImage(host, uniqueId, appId) {
   );
 }
 
-module.exports = { serverInfo, pair, unpair, listApps, appImage, httpsPortOf };
+module.exports = { serverInfo, pair, unpair, cancelApp, listApps, appImage, httpsPortOf };

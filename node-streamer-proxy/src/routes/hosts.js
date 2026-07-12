@@ -157,6 +157,21 @@ function hostRoutes(ctx) {
     res.end();
   });
 
+  // ---- Cancel the running app (Rust: POST /host/cancel) ------------------
+  // The frontend's "quit" button calls this (web/api.ts:422). Closing the tab
+  // only kills the streamer; Sunshine keeps the app running on purpose so the
+  // session can be resumed. This is what actually terminates it.
+  router.post("/host/cancel", auth, async (req, res) => {
+    try {
+      const host = storage.getHostForUser(req.user, req.body.host_id);
+      const success = await moonlight.cancelApp(host, uniqueId(req.user));
+      res.json({ success });
+    } catch (err) {
+      console.warn("[Cancel] failed:", err.message);
+      res.status(errStatus(err)).json({ error: err.message });
+    }
+  });
+
   // ---- Apps --------------------------------------------------------------
 
   router.get("/apps", auth, async (req, res) => {
