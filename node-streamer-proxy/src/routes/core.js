@@ -7,6 +7,7 @@ const {
   requireAdmin,
   cookieOptions,
   login,
+  isDefaultUser,
 } = require("../auth");
 const { newPassword } = require("../password");
 
@@ -55,7 +56,14 @@ function coreRoutes(ctx) {
 
   // ---- Users -------------------------------------------------------------
 
-  const publicUser = (u) => ({ id: u.id, name: u.name, role: u.roleId });
+  const publicUser = (u) => ({
+    id: u.id,
+    name: u.name,
+    role: u.roleId,
+    // Rust exposes this on DetailedUser (app/user.rs:138) so the UI can tell
+    // an anonymous visitor from a real logged-in account.
+    is_default_user: isDefaultUser(ctx, u),
+  });
 
   router.get("/users", auth, admin, (_req, res) => {
     res.json({ users: storage.listUsers().map(publicUser) });

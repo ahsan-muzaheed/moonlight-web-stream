@@ -47,10 +47,35 @@ function resolveUser(req, ctx) {
   const cookieToken = req.cookies && req.cookies[COOKIE_SESSION_TOKEN_NAME];
   if (cookieToken) {
     const session = storage.getSession(cookieToken);
-    return session ? storage.getUser(session.userId) : null;
+    const user = session ? storage.getUser(session.userId) : null;
+    if (user) return user;
+    // Stale/expired cookie: fall through to the default user rather than 401.
   }
 
-  return null;
+  // 4. No credentials at all -> the configured default user, if any.
+  //    Mirrors Rust user_by_auth(UserAuth::None) + is_default_user (app/mod.rs:255).
+  //    This is what lets a shared URL work with no login.
+  return defaultUser(ctx);
+}
+
+/** The public/anonymous identity, or null if default_user_id isn't configured. */
+function defaultUser(ctx) {
+  const { config, storage } = ctx;
+  const id = config.web_server.default_user_id;
+  if (id === null || id === undefined) return null;
+
+  const user = storage.getUser(id);
+  if (!user) {
+    console.error(`[Auth] default_user_id ${id} is configured but no such user exists!`);
+    return null;
+  }
+  return user;
+}
+
+/** Is this user the anonymous/default identity? */
+function isDefaultUser(ctx, user) {
+  const id = ctx.config.web_server.default_user_id;
+  return id !== null && id !== undefined && user && user.id === Number(id);
 }
 
 /** Require any authenticated user; attaches req.user. */
@@ -121,6 +146,8 @@ function login(ctx, name, password) {
 module.exports = {
   COOKIE_SESSION_TOKEN_NAME,
   resolveUser,
+  defaultUser,
+  isDefaultUser,
   requireAuth,
   requireAdmin,
   cookieOptions,
