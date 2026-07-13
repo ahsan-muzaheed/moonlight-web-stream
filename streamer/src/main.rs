@@ -111,10 +111,12 @@ async fn main() {
         client_certificate,
         server_certificate,
         app_id,
-        demo_param,
         video_frame_queue_size,
         audio_sample_queue_size,
         permissions,
+        			url_origin,   // add
+			url_path,     // add
+			url_params,   // add
     ) = loop {
         match ipc_receiver.recv().await {
             Some(ServerIpcMessage::Init {
@@ -126,10 +128,14 @@ async fn main() {
                 client_certificate,
                 server_certificate,
                 app_id,
-                demo_param,
                 video_frame_queue_size,
                 audio_sample_queue_size,
                 permissions,
+				        			url_origin,   // add
+			url_path,     // add
+			url_params,   // add
+				
+
             }) => {
                 break (
                     config,
@@ -140,10 +146,12 @@ async fn main() {
                     client_certificate,
                     server_certificate,
                     app_id,
-                    demo_param,
                     video_frame_queue_size,
                     audio_sample_queue_size,
                     permissions,
+				        			url_origin,   // add
+			url_path,     // add
+			url_params,   // ad
                 );
             }
             _ => continue,
@@ -178,6 +186,12 @@ async fn main() {
 
     // print permissions
     info!("Got Permissions: {permissions:?}");
+	
+	// -- Rebuild the full browser URL from its components and log it.
+	// Mirror of the reconstructors in the Node server and the Sunshine fork.
+	let rebuilt_url = rebuild_url(&url_origin, &url_path, &url_params);
+	info!("[Stream] Rebuilt URL: {rebuilt_url}");
+
 
     // Send stage
     ipc_sender
@@ -216,11 +230,7 @@ async fn main() {
 
     let connection = StreamConnection::new(
         moonlight,
-        StreamInfo {
-            host,
-            app_id,
-            demo_param,
-        },
+        StreamInfo { host, app_id },
         ipc_sender.clone(),
         ipc_receiver,
         config,
@@ -252,7 +262,6 @@ async fn main() {
 struct StreamInfo {
     host: MoonlightHost<RequestClient>,
     app_id: u32,
-    demo_param: Option<String>,
 }
 
 struct StreamSetup {
@@ -789,10 +798,6 @@ impl StreamConnection {
 
         let aes_key = AesKey::new_random(&OpenSSLCryptoBackend)?;
         let aes_iv = AesIv::new_random(&OpenSSLCryptoBackend)?;
-        let launch_query_parameters = append_demo_param(
-            self.moonlight.launch_query_parameters(),
-            self.info.demo_param.as_deref(),
-        );
 
         let stream_config = match host
             .start_stream(
@@ -800,7 +805,7 @@ impl StreamConnection {
                 &settings,
                 aes_key,
                 aes_iv,
-                &launch_query_parameters,
+                self.moonlight.launch_query_parameters(),
             )
             .await
         {
@@ -972,40 +977,6 @@ impl StreamConnection {
         debug!("Notifying termination");
         self.terminate.notify_waiters();
     }
-}
-
-fn append_demo_param(existing_query: &str, demo_param: Option<&str>) -> String {
-    let mut query = existing_query.to_string();
-
-    let Some(demo_param) = demo_param else {
-        return query;
-    };
-
-    if !query.is_empty() {
-        query.push('&');
-    }
-    query.push_str("demoParam=");
-    query.push_str(&percent_encode_query_value(demo_param));
-
-    query
-}
-
-fn percent_encode_query_value(value: &str) -> String {
-    let mut encoded = String::new();
-
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                encoded.push(byte as char);
-            }
-            _ => {
-                encoded.push('%');
-                encoded.push_str(&format!("{byte:02X}"));
-            }
-        }
-    }
-
-    encoded
 }
 
 struct StreamConnectionListener {
@@ -1214,5 +1185,32 @@ impl ConnectionListenerC for StreamConnectionListener {
                 )
                 .await
         })
+    }
+}
+
+use std::collections::HashMap;
+/// Rebuild the full browser URL from the components sent in Init.
+/// Params are sorted so every layer (Node, streamer, Sunshine) produces the
+/// byte-identical URL from the same data.
+fn rebuild_url(origin: &str, path: &str, params: &HashMap<String, String>) -> String {
+    let mut pairs: Vec<(&String, &String)> = params.iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0)); // deterministic order
+
+    let query: String = pairs
+        .iter()
+        .map(|(k, v)| {
+            format!(
+                "{}={}",
+                form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
+                form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+
+    if query.is_empty() {
+        format!("{origin}{path}")
+    } else {
+        format!("{origin}{path}?{query}")
     }
 }
