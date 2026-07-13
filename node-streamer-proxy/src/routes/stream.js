@@ -60,11 +60,35 @@ class StreamerProcess {
   }
 }
 
+// Coerce one URL component (origin or path) to a bounded, control-char-free
+// string. Caps length so a hostile URL can't bloat the Init or the app env.
+function sanitizeUrlPart(value, maxLen) {
+  if (typeof value !== "string") return "";
+  // strip CR/LF/NUL so the value can't inject into headers or env blocks
+  return value.replace(/[\r\n\0]/g, "").slice(0, maxLen);
+}
+
+// Coerce the query params into a safe flat string->string map.
+// Caps the number of params and each value's length.
+function sanitizeUrlParams(params) {
+  const out = {};
+  if (!params || typeof params !== "object") return out;
+  let n = 0;
+  for (const [k, v] of Object.entries(params)) {
+    if (n++ >= 64) break;                          // cap number of params
+    if (typeof k !== "string") continue;
+    const key = k.replace(/[\r\n\0]/g, "").slice(0, 128);   // cap key length
+    const val = String(v ?? "").replace(/[\r\n\0]/g, "").slice(0, 4096); // cap value length
+    out[key] = val;
+  }
+  return out;
+}
+
 /**
  * Build the streamer's Init payload from stored host + pairing data.
  * This is the piece the earlier stand-alone relay left as a stub.
  */
-async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize, audioSampleQueueSize }) {
+async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize, audioSampleQueueSize, urlOrigin, urlPath, urlParams }) {
   const { storage, config } = ctx;
 
   const host = storage.getHostForUser(user, hostId); // throws HostNotFound/Forbidden
@@ -95,6 +119,18 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
       video_frame_queue_size: videoFrameQueueSize ?? 8,
       audio_sample_queue_size: audioSampleQueueSize ?? 8,
       permissions,
+      // ---- URL passthrough -------------------------------------------------
+      // The browser's full stream URL, split into components so the streamer
+      // and Sunshine can rebuild it on demand without hitting a query-string
+      // length limit (components stay separate params instead of one nested,
+      // double-encoded blob). Rebuild: url_origin + url_path + "?" + encode(url_params)
+      //
+      // url_origin : scheme + host + port, e.g. "http://172.7.191.71:8080" (no trailing slash)
+      // url_path   : path only, e.g. "/stream.html"
+      // url_params : flat string->string map of every query param (hostId, appId, + custom)
+      url_origin: sanitizeUrlPart(urlOrigin, 512),
+      url_path: sanitizeUrlPart(urlPath, 512),
+      url_params: sanitizeUrlParams(urlParams),
     },
     app,
   };
@@ -165,6 +201,10 @@ function registerStreamRoutes(app, ctx) {
           appId: init.app_id,
           videoFrameQueueSize: init.video_frame_queue_size,
           audioSampleQueueSize: init.audio_sample_queue_size,
+          // URL components the browser now sends (see sendInitMessage in the frontend)
+          urlOrigin: init.url_origin,
+          urlPath: init.url_path,
+          urlParams: init.url_params,
         });
       } catch (err) {
         console.warn("[Stream] failed to start:", err.message);

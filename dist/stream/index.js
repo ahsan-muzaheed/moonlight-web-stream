@@ -296,13 +296,20 @@ export class Stream {
         return ws;
     }
     sendInitMessage() {
+        // Split the current URL into components so the streamer and Sunshine can
+        // rebuild it without a query-string length limit. snake_case keys match serde.
+        const loc = window.location;
+        const url_params = {};
+        new URLSearchParams(loc.search).forEach((v, k) => { url_params[k] = v; });
         this.sendWsMessage({
             Init: {
                 host_id: this.hostId,
                 app_id: this.appId,
-                demo_param: this.demoParam,
                 video_frame_queue_size: this.settings.videoFrameQueueSize,
                 audio_sample_queue_size: this.settings.audioSampleQueueSize,
+                url_origin: loc.origin, // "http://172.7.191.71:8080" (scheme+host+port, no trailing slash)
+                url_path: loc.pathname, // "/stream.html"
+                url_params, // every query param: hostId, appId, + custom
             }
         });
     }
