@@ -4,7 +4,7 @@
     "port": 8080,                                             
     "url_path_prefix": "",                                   
     "forwarded_header": null,  
-	"default_user_id": 1,	
+	"default_user_id1": 1,	
     "first_login_create_admin": true,                         
     "session_cookie_expiration_secs": 604800,                 
     "session_cookie_secure": false,                           
