@@ -17,7 +17,7 @@
     "path": "../target/release/streamer.exe",                 
     "log_level": "Debug",
  "cancel_app_on_disconnect": true,
-  "cancel_grace_secs": 10	
+  "cancel_grace_secs": 1	
   },                                                          
   "webrtc": {                                                 
     "ice_servers": [                                          
