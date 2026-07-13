@@ -465,9 +465,19 @@ pub enum StreamClientMessage {
     Init {
         host_id: u32,
         app_id: u32,
-        demo_param: Option<String>,
+        //demo_param: Option<String>,
         video_frame_queue_size: usize,
         audio_sample_queue_size: usize,
+		
+		// URL components from the browser, rebuilt on demand by the streamer / Sunshine.
+		// snake_case wire keys; #[serde(default)] keeps older clients that omit them working.
+		#[serde(default)]
+		url_origin: String,                                    // "http://host:port", no trailing slash
+		#[serde(default)]
+		url_path: String,                                      // "/stream.html"
+		#[serde(default)]
+		url_params: std::collections::HashMap<String, String>, // hostId, appId, + custom
+
     },
     WebRtc(StreamSignalingMessage),
     SetTransport(TransportType),
