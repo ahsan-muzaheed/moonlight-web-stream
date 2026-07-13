@@ -72,7 +72,7 @@ pub async fn start_host(
         let StreamClientMessage::Init {
             host_id,
             app_id,
-            demo_param,
+            //demo_param,
             video_frame_queue_size,
             audio_sample_queue_size,
         } = message
@@ -335,7 +335,7 @@ pub async fn start_host(
             client_certificate: pair_info.client_certificate,
             server_certificate: pair_info.server_certificate,
             app_id: app_id.0,
-            demo_param,
+           // demo_param,
             video_frame_queue_size,
             audio_sample_queue_size,
             permissions,
