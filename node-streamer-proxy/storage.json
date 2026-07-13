@@ -50,22 +50,56 @@
   "hosts": {
     "1": {
       "id": 1,
+      "address": "127.0.0.1",
+      "httpPort": 47989,
+      "ownerId": 1,
+      "pairInfo": {
+        "clientCertificate": "-----BEGIN CERTIFICATE-----\r\nMIICvzCCAaegAwIBAgIBATANBgkqhkiG9w0BAQsFADAjMSEwHwYDVQQDExhOVklE\r\nSUEgR2FtZVN0cmVhbSBDbGllbnQwHhcNMjYwNzEyMTM0NDExWhcNNDYwNzEyMTM0\r\nNDExWjAjMSEwHwYDVQQDExhOVklESUEgR2FtZVN0cmVhbSBDbGllbnQwggEiMA0G\r\nCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCp480XxCGPJ0nztgSHF8pWLCETz5OH\r\n6NhPwSH8uKLHS/DgziPG61k62xpW3HMq2rOj6e/B0dvf7aPg7nQVPAlMZF4S5d45\r\nctyIJAQY7Cti+UXfV2IzzEFuJdFY5UrY24nHkqaFMJVnLi22Sba84Z8DVAV8I+Hj\r\nWTrM/tmBMVqMbEgnspcHyqAFXdZDhMi2rQGhZvAaXwUKOtaVw/5+I1FQcocL+uFy\r\n3+2orzJRJ04NzIYU09HBtGYF9MYLeBVNii28xoMg9KXT05i45rq+fdDvdCFi5iY0\r\n9iE2AUyWVGrzzBzu2BTVHMu5hYVYT0Cdq952un7mJW1iMfFfniKyx9T5AgMBAAEw\r\nDQYJKoZIhvcNAQELBQADggEBAGtt3hA1udx8wZCwdtMildIwKbd4OYDw2P6t0epe\r\nC7ZDI1GuKYhxV17GirMNrdf0vT3bwROdJIJ/Karu/KqrnoXJWTkR9P41IXnHerJJ\r\nc0LQOSKsTipV/V/xNmaa8/TjP2JJ9QF1G6jhRJ2aeIXx1lLu+DQfgGbWkje+UnOG\r\nfrZsX7qfqpCIgmA9aCOh2dZsQOxAKl71geqwjPdXcvCc0AEuTLOQPnsssM/6U2QL\r\n9BCmblbK1pevdHN68wICT/69xqeDJSxkT4+u21UzTGzw2KpLeb14Ya42xCPdk4m+\r\nPogiFgIuynEoO/rJUUHZ6Ie+Z5/3LTxehG/HuLZxQiib6x4=\r\n-----END CERTIFICATE-----\r\n",
+        "clientPrivateKey": "-----BEGIN RSA PRIVATE KEY-----\r\nMIIEpAIBAAKCAQEAqePNF8QhjydJ87YEhxfKViwhE8+Th+jYT8Eh/Liix0vw4M4j\r\nxutZOtsaVtxzKtqzo+nvwdHb3+2j4O50FTwJTGReEuXeOXLciCQEGOwrYvlF31di\r\nM8xBbiXRWOVK2NuJx5KmhTCVZy4ttkm2vOGfA1QFfCPh41k6zP7ZgTFajGxIJ7KX\r\nB8qgBV3WQ4TItq0BoWbwGl8FCjrWlcP+fiNRUHKHC/rhct/tqK8yUSdODcyGFNPR\r\nwbRmBfTGC3gVTYotvMaDIPSl09OYuOa6vn3Q73QhYuYmNPYhNgFMllRq88wc7tgU\r\n1RzLuYWFWE9Anavedrp+5iVtYjHxX54issfU+QIDAQABAoIBAAw9dSaX8yoG9OFJ\r\n9SgNiv6r5cMxYqn5WPJgEhSM8e9ldYig2XuIs9BVfl+ROPv2r1gpL+S5O7v1uWeo\r\njnUEMxBNr+hxJtJhR+nIHIJ2K4cROhtGBrWAKxumPl/G/15B7PqTwosYjb8WGOWI\r\nCJIxuDzrZgzEYg84+89OsjmIZoN04JaxcvyVP8EVOksjqgvZKwT1OgT4vsI58QX6\r\n+YlePPftzCBEtv0HMmFb7W6EfvbtnazzADtzkeC/mecpGTLuJ4eYIlfwbOTwFPRI\r\nMaER1D2J3x0wEJKDR+8r/LC/+Asbb3/tayyNSFKB4zREkxOdr1c/rQSfQI360Hu9\r\nB/Fi5L0CgYEA4WiVNcuWzCQplPjYCdDFfcWs3AbVx9vKH34jDNxwqX8JnFsaK2OA\r\nMPRt+T5ZF96XjeBrk/tkeGVLWQmB/Eo/+jg/cIJcInXcUEijduQ83B0LoYGTPL/Y\r\nOIberGZsJZMg2fjZdftVh5/t2boPNNX9dyWkXy3PpUpMfm2lwJ9dJcUCgYEAwPJS\r\nIw9TMARyPtvwP+TEieIVhFX3BCxv3H4qw1azWw0MQbFAm4HwOxvEC/s2Hq90C62/\r\nzkeTpCVi+dYPEoTPIWHR2uvCZDMYUhVATS1bfg2DLf7V332p+11P7oErlEzXFyI9\r\ngcdAhBnoCTBIWYRiMKte5WE4dD9YrROjajn5WaUCgYBF3j7xz8tMN6FT9dYxJK8y\r\njwVHpi65plz+agC/Scz6HNCD0JFKBauEgR9ddH/1MB/V8EwoMHIyB2PVk2bhJrqx\r\n+qFfZGjenZ3OnNVeUtyydaZXR2y2FdkVnGiFE7JN607xgXsWYPNf+KinJk70V6gb\r\nOGW8wtxsJZ2USrRoAn3C6QKBgQC2846Ki/d3KmAh1m6CRytNCsEYUGL+5BvVWRS3\r\nUDiU91RN3gLC8XyWr4c/TR5ODlPc1w1uTVRjasfk2eJEzwWQQ663BKG4XPKMsnXc\r\nOEvuxGVEccTeO8u3+wzVvElUP2AcIW1s5z/3gpEQVWXk67AnMfezTHI5V+9/fYWQ\r\nLhSPuQKBgQDhWc5T/sVdH+mkPewQsBjBA/NaaW7LdnU/bnEjA/0ZOdVBAg51hCqM\r\nBxGb40EfNUEiAEVE/oswXc60HL+Sm8giDIZ53EPsJHgBDl95p1jNhnFZTs7Ec2ST\r\noPLzM2PvRkOej0OIVyGv7Y/DZfak14OwjOr+KPCU6efLYYY4mElzAg==\r\n-----END RSA PRIVATE KEY-----\r\n",
+        "serverCertificate": "-----BEGIN CERTIFICATE-----\nMIIC0jCCAbqgAwIBAgIULbHePCgEovNT8wLISk0woNL5b00wDQYJKoZIhvcNAQEL\nBQAwIzEhMB8GA1UEAwwYU3Vuc2hpbmUgR2FtZXN0cmVhbSBIb3N0MB4XDTI2MDYw\nOTE3MzkwN1oXDTQ2MDYwNDE3MzkwN1owIzEhMB8GA1UEAwwYU3Vuc2hpbmUgR2Ft\nZXN0cmVhbSBIb3N0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuO22\nSSYNl5Y2m73IhadrEV3FkxFi0YklxwpALC/PdgJVrQko/H8eXX3ez/wKDEWvU2wi\nHojv0YjD9RYl04VYQJp+UbwHQgaJU30vq+icyWFXJM/hlg7KqV9d+Yr1OSrOQLkE\ndfr4KmWAN9oO6t2yQxHlvjivIXRG22t6hpAOPWqeKXuc8R522YvNxBx6xpwkzCPi\ncx3nFXfFe7qFRZkW7GL3BY2zmIx5i3ZV0YWDUORb32N5CCBsgyW3Bt74hKRSTnb2\n0jty69DfAI8EeU/zuErJSKrH4SlOtqVEy+b3kp1/iI2rrzo+lQKQjiTTyLnWJPFw\nFUrtR+9ou0ZwdYrUmwIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQBkF7xjNjLioVYl\ncH7rUGZXWZ/Vz3f7O3gK7hay6pMrUq5MmuNbV1rJcKolEN+bNvMMNqLKzMt3d/xf\nEWZMBX1vZFVEHlN0D0g4FxeaROTQcye2BsK8fKRdsKlkIYIBqtF+ayLaMCp5W5iC\n+jeCkO/q2JCYHmkZj7u0SoZec3T/HzVwHigHRncqohwIHHpn7EDTQ+9w5v49Gq8T\nmEX82j/O/WpjvxWsq0rmgo+FjOPo+p1x2dmrf8PR5ZosljNRKQn5vJzcWMsWBOyv\nwHNSybydAH9jWQXXsHYQrT1JN9xbianDQ1A8b6M7k1FPj+wwynkWSWiAXOBqf706\n9fnaQHes\n-----END CERTIFICATE-----\n"
+      },
+      "cache": null
+    },
+    "2": {
+      "id": 2,
       "address": "172.7.191.71",
       "httpPort": 47989,
       "ownerId": 1,
       "pairInfo": null,
-      "cache": null
+      "cache": {
+        "name": "E3DS-MDL-S10"
+      }
     }
   },
   "sessions": {
     "wuQcCH7NCS8zv5tdIbq4rO8SGhBcw3I5mCWV6ATiYjg": {
       "userId": 1,
       "expiresAt": 1784440103685
+    },
+    "bx-3yXzO0MzQ4QFn7y40TcxblWq-sMVOyozgkMhBFUw": {
+      "userId": 1,
+      "expiresAt": 1784441614577
+    },
+    "95pzV1mGG8b3tIZZ9znngs7OmU7Hy8O-24zf5GUpjXw": {
+      "userId": 1,
+      "expiresAt": 1784465193066
+    },
+    "9Vnf92r8qR7CmfMUK8kOIIGxmIYbuY7Jk8Y_hxudA_Y": {
+      "userId": 1,
+      "expiresAt": 1784465195667
+    },
+    "rxEZkpp-JYcMhCvgfzAVWzBtrynWiHFKr8Kairde7IM": {
+      "userId": 1,
+      "expiresAt": 1784465814409
+    },
+    "hVOBiI7bpXwnJk82A9pShlENSAwK_bABmZ_4_dKGHnQ": {
+      "userId": 1,
+      "expiresAt": 1784526841945
     }
   },
   "nextIds": {
     "user": 2,
     "role": 3,
-    "host": 2
+    "host": 3
   }
 }
