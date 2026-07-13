@@ -230,7 +230,10 @@ async fn main() {
 
     let connection = StreamConnection::new(
         moonlight,
-        StreamInfo { host, app_id },
+        StreamInfo { host, app_id ,
+    url_origin,
+    url_path,
+    url_params,},
         ipc_sender.clone(),
         ipc_receiver,
         config,
@@ -262,6 +265,11 @@ async fn main() {
 struct StreamInfo {
     host: MoonlightHost<RequestClient>,
     app_id: u32,
+	// Browser URL components, forwarded to Sunshine on launch so the app
+    // can read them from its environment.
+    url_origin: String,
+    url_path: String,
+    url_params: HashMap<String, String>,
 }
 
 struct StreamSetup {
@@ -799,7 +807,7 @@ impl StreamConnection {
         let aes_key = AesKey::new_random(&OpenSSLCryptoBackend)?;
         let aes_iv = AesIv::new_random(&OpenSSLCryptoBackend)?;
 
-        let stream_config = match host
+        /* let stream_config = match host
             .start_stream(
                 self.info.app_id,
                 &settings,
@@ -828,6 +836,74 @@ impl StreamConnection {
                 return Err(err.into());
             }
         };
+ */
+ 
+ 
+
+	// ---- Merge moonlight's launch params with our URL passthrough ------------
+	// moonlight generates its own (rikey, rikeyid, mode, sops, gcmap, ...).
+	// We append the browser's URL components so Sunshine can rebuild the full URL
+	// and expose it to the launched app as environment variables.
+	let base = self.moonlight.launch_query_parameters();
+
+	let mut extra: Vec<String> = Vec::new();
+	// Prefix everything so Sunshine can identify our params without needing a
+		// hardcoded list of GameStream keys, and so a browser param can never
+		// collide with moonlight's own (mode, rikey, appid, ...).
+		extra.push(format!(
+			"web_url_origin={}",
+			form_urlencoded::byte_serialize(self.info.url_origin.as_bytes()).collect::<String>()
+		));
+		extra.push(format!(
+			"web_url_path={}",
+			form_urlencoded::byte_serialize(self.info.url_path.as_bytes()).collect::<String>()
+		));
+		for (k, v) in &self.info.url_params {
+			extra.push(format!(
+				"web_p_{}={}",
+				form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
+				form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>()
+			));
+		}
+	let extra = extra.join("&");
+
+	let launch_query = if base.is_empty() {
+		extra
+	} else if extra.is_empty() {
+		base.to_string()
+	} else {
+		format!("{base}&{extra}")
+	};
+
+	info!("[Stream] launch query -> Sunshine: {launch_query}");   // so you can see it
+
+	let stream_config = match host
+		.start_stream(
+			self.info.app_id,
+			&settings,
+			aes_key,
+			aes_iv,
+			&launch_query,          // <-- was self.moonlight.launch_query_parameters()
+		)
+		.await
+	{
+		Ok(value) => value,
+		Err(err) => {
+			warn!("[Stream]: failed to start moonlight stream: {err}");
+			#[allow(clippy::single_match)]
+			match err {
+				MoonlightClientError::Moonlight(MoonlightError::ConnectionAlreadyExists) => {
+					ipc_sender
+						.send(StreamerIpcMessage::WebSocket(
+							StreamServerMessage::DebugLog { message: "Failed to start stream because this streamer is already streaming".to_string(), ty: None },
+						))
+						.await;
+				}
+				_ => {}
+			}
+			return Err(err.into());
+		}
+	};
 
         let settings_clone = settings.clone();
         let moonlight_instance = self.moonlight.clone();
