@@ -190,7 +190,7 @@ async fn main() {
 	// -- Rebuild the full browser URL from its components and log it.
 	// Mirror of the reconstructors in the Node server and the Sunshine fork.
 	let rebuilt_url = rebuild_url(&url_origin, &url_path, &url_params);
-	info!("[Stream] Rebuilt URL: {rebuilt_url}");
+	info!("[Stream] streaming url: {rebuilt_url}");
 
 
     // Send stage
