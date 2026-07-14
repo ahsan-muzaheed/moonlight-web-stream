@@ -89,6 +89,9 @@ function sanitizeUrlParams(params) {
  * This is the piece the earlier stand-alone relay left as a stub.
  */
 async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize, audioSampleQueueSize, urlOrigin, urlPath, urlParams }) {
+	
+	console.log("[Init] urlParams:", JSON.stringify(urlParams), "appId:", appId);
+	
   const { storage, config } = ctx;
 
   const host = storage.getHostForUser(user, hostId); // throws HostNotFound/Forbidden
@@ -96,8 +99,72 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
 
   // Confirm the requested app exists on the host.
   const apps = await moonlight.listApps(host, user.hostUniqueId);
-  const app = apps.find((a) => a.app_id === Number(appId));
+  
+  
+//const app = apps.find((a) => a.app_id === Number(appId));
+  //if (!app) throw new Error("AppNotFound");
+  
+// Prefer an app NAME if the URL supplied one - ids are CRC32(name+image), so
+// they change if an app is renamed, silently breaking saved links. Names are stable.
+const wantedName = urlParams && urlParams.appName;
+
+/* let app;
+if (wantedName) {
+  app = apps.find((a) => a.title === wantedName);
+  if (!app) throw new Error(`ss-> AppNotFound: no app named "${wantedName}"`);
+} else {
+  app = apps.find((a) => a.app_id === Number(appId));
   if (!app) throw new Error("AppNotFound");
+} */
+
+// Find the app to launch.
+// Prefer ?appName= when present: Sunshine derives app ids as CRC32(name + image),
+// so renaming an app changes its id and breaks saved links. Names are stable.
+let app = null;
+
+if (wantedName) 
+{
+  // Look up by name
+  console.log("[Init] apps.length:", apps.length);
+  console.log("[Init] wantedName:",wantedName);
+  
+  for (let i = 0; i < apps.length; i++) {
+	  
+	   console.log("[Init] apps[i].title:", apps[i].title);
+	   
+    if (apps[i].title === wantedName) {
+      app = apps[i];
+      break;
+    }
+  }
+  if (app === null) {
+    throw new Error(`AppNotFound: no app named "${wantedName}"`);
+  }
+} else {
+  // Look up by numeric id
+  const wantedId = Number(appId);
+    console.log("[Init] wantedId:",wantedId);
+  for (let i = 0; i < apps.length; i++) {
+	  
+	   console.log("[Init] apps[i].app_id:", apps[i].app_id);
+	   
+	   
+    if (apps[i].app_id === wantedId) {
+      app = apps[i];
+      break;
+    }
+  }
+  if (app === null) {
+    throw new Error(`AppNotFound: no app with id ${appId}`);
+  }
+}
+
+// use the resolved id everywhere downstream
+const resolvedAppId = app.app_id;
+
+  
+  
+  
 
   const role = storage.getRole(user.roleId);
   const permissions = role ? role.permissions : {};
@@ -115,7 +182,7 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
       client_private_key: toPkcs8(host.pairInfo.clientPrivateKey),
       client_certificate: host.pairInfo.clientCertificate,
       server_certificate: host.pairInfo.serverCertificate,
-      app_id: Number(appId),
+      app_id: app.app_id,//Number(appId),
       video_frame_queue_size: videoFrameQueueSize ?? 8,
       audio_sample_queue_size: audioSampleQueueSize ?? 8,
       permissions,

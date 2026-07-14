@@ -42,7 +42,9 @@ function startApp() {
         // Get Host and App via Query
         const hostIdStr = queryParams.get("hostId");
         const appIdStr = queryParams.get("appId");
-        if (hostIdStr == null || appIdStr == null) {
+        const appNameStr = queryParams.get("appName");
+        //if (hostIdStr == null || appIdStr == null) 
+        if (!hostIdStr || (!appIdStr && !appNameStr)) {
             yield showMessage(I.stream.missingHostOrApp);
             window.close();
             return;
