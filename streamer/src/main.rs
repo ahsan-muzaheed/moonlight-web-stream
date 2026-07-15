@@ -78,6 +78,8 @@ mod convert;
 mod dynamic_ice_servers;
 mod transport;
 mod video;
+mod transport_config; // NEW
+mod ws_transport;     // NEW
 
 #[tokio::main]
 async fn main() {
@@ -89,8 +91,31 @@ async fn main() {
 
     // At this point we're authenticated
     let span = span!(Level::TRACE, "ipc");
-    let (mut ipc_sender, mut ipc_receiver) =
-        create_process_ipc::<ServerIpcMessage, StreamerIpcMessage>(span, stdin(), stdout()).await;
+	
+	
+	//////////////////
+	 //let (mut ipc_sender, mut ipc_receiver) =
+     //   create_process_ipc::<ServerIpcMessage, StreamerIpcMessage>(span, stdin(), stdout()).await;
+	 
+	 
+	let transport_cfg = transport_config::TransportConfig::load();
+	let (mut ipc_sender, mut ipc_receiver) = match transport_cfg.transport {
+		transport_config::TransportMode::Stdio => {
+			create_process_ipc::<ServerIpcMessage, StreamerIpcMessage>(span.clone(), stdin(), stdout()).await
+		}
+		transport_config::TransportMode::Websocket => {
+			match ws_transport::connect_websocket_ipc(span.clone(), &transport_cfg).await {
+				Ok(pair) => pair,
+				Err(err) => {
+					eprintln!("[transport] websocket connect failed: {err}");
+					exit(1);
+				}
+			}
+		}
+	};
+	//////////////////
+	
+   
 
     // Send stage
     ipc_sender
