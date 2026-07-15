@@ -1,0 +1,1071 @@
+import { StreamControllerCapabilities, StreamMouseButton, TransportChannelId } from "../api_bindings.js";
+import { showNotification } from "../component/notification.js";
+import { ByteBuffer, I16_MAX, U16_MAX, U8_MAX } from "./buffer.js";
+import { emptyGamepadState, extractGamepadState, SUPPORTED_BUTTONS } from "./gamepad.js";
+import { convertToKey, convertToModifiers } from "./keyboard.js";
+import { convertToButton } from "./mouse.js";
+// Smooth scrolling multiplier
+const TOUCH_HIGH_RES_SCROLL_MULTIPLIER = 10;
+// Normal scrolling multiplier
+const TOUCH_SCROLL_MULTIPLIER = 1;
+// Distance until a touch cannot be a click anymore
+const TOUCH_AS_CLICK_MAX_DISTANCE = 2;
+// Time till it's registered as a click, else it might be scrolling
+const TOUCH_AS_CLICK_MIN_TIME_MS = 100;
+// Everything greater than this is a right click
+const TOUCH_AS_CLICK_MAX_TIME_MS = 350;
+// How much to move to open up the screen keyboard when having three touches at the same time
+const TOUCHES_AS_KEYBOARD_DISTANCE = 100;
+// Two-finger scroll only starts after one finger clearly commits to scrolling
+const TWO_TOUCH_SCROLL_TRIGGER_DISTANCE = 3;
+// How long is the first tap allowed to be for it to maybe be a double tap
+const DOUBLE_TAP_FIRST_TAP_MAX_TIME_MS = 100;
+// How much time is allowed after a touch release for a new tap to count both taps as a double tap
+const DOUBLE_TAP_SECOND_TAP_MAX_TIME_MS = 200;
+const CONTROLLER_RUMBLE_INTERVAL_MS = 60;
+function trySendChannel(channel, buffer) {
+    if (!channel) {
+        console.info(`dropping packet on channel ${channel} because the channel is not present.`);
+        return;
+    }
+    buffer.flip();
+    const readBuffer = buffer.getRemainingBuffer();
+    if (readBuffer.length == 0) {
+        throw "illegal buffer size";
+    }
+    channel.send(readBuffer.buffer);
+}
+export function defaultStreamInputConfig() {
+    return {
+        mouseMode: "follow",
+        mouseScrollMode: "highres",
+        touchMode: "mouseRelative",
+        localCursorSensitivity: 1,
+        controllerConfig: {
+            invertAB: false,
+            invertXY: false,
+            sendIntervalOverride: null
+        }
+    };
+}
+export class StreamInput {
+    constructor(config) {
+        this.eventTarget = new EventTarget();
+        this.buffer = new ByteBuffer(1024);
+        this.connected = false;
+        this.capabilities = { touch: true };
+        // Size of the streamer device
+        this.streamerSize = [0, 0];
+        this.keyboard = null;
+        this.mouseReliable = null;
+        this.mouseAbsolute = null;
+        this.mouseRelative = null;
+        this.touch = null;
+        this.controllers = null;
+        this.controllerInputs = [];
+        this.touchSupported = null;
+        this.localCursorPosition = null;
+        // -- Keyboard
+        this.pressedKeys = new Set();
+        this.scrollRemainderX = 0;
+        this.scrollRemainderY = 0;
+        // -- Touch
+        this.touchTracker = new Map();
+        // The current action of all touches on screen
+        // - default -> the default action for this touch mode / we're still trying to figure out what the user is trying to do
+        // - drag -> movement continues without click handling on release
+        // - scroll -> we're currently scrolling using primary touch
+        // - screenKeyboard -> this current action is trying to pull up the on screen keyboard
+        // - longPress -> single-finger long press is armed and will become a right click on release
+        this.touchMouseAction = "default";
+        // The touch that is selected as the primary / controller of the action
+        // Used in touch mode "relative" and "pointAndDrag"
+        // E.g. scrolling movement
+        this.primaryTouch = null;
+        // If the next touch is a double tap?
+        this.nextTouchDoubleTap = false;
+        // Set when the current gesture has already been consumed by a multi-touch
+        // action. This prevents the remaining finger from becoming a click/right-click.
+        this.touchGestureSuppressClick = false;
+        // -- Controller
+        // Wait for stream to connect and then send controllers
+        this.bufferedControllers = [];
+        this.gamepads = [];
+        this.gamepadRumbleInterval = null;
+        this.lastGamepadUpdate = performance.now();
+        // -- Controller rumble
+        this.gamepadRumbleCurrent = [];
+        this.config = defaultStreamInputConfig();
+        if (config) {
+            this.setConfig(config);
+        }
+    }
+    getDataChannel(transport, id) {
+        const channel = transport.getChannel(id);
+        if (channel.type == "data") {
+            return channel;
+        }
+        throw `Failed to get channel ${id} as data transport channel`;
+    }
+    setTransport(transport) {
+        this.keyboard = this.getDataChannel(transport, TransportChannelId.KEYBOARD);
+        this.mouseReliable = this.getDataChannel(transport, TransportChannelId.MOUSE_RELIABLE);
+        this.mouseAbsolute = this.getDataChannel(transport, TransportChannelId.MOUSE_ABSOLUTE);
+        this.mouseRelative = this.getDataChannel(transport, TransportChannelId.MOUSE_RELATIVE);
+        if (this.touch) {
+            this.touch.removeReceiveListener(this.onTouchData.bind(this));
+        }
+        this.touch = this.getDataChannel(transport, TransportChannelId.TOUCH);
+        this.touch.addReceiveListener(this.onTouchData.bind(this));
+        if (this.controllers) {
+            this.controllers.removeReceiveListener(this.onTouchData.bind(this));
+        }
+        this.controllers = this.getDataChannel(transport, TransportChannelId.CONTROLLERS);
+        this.controllers.addReceiveListener(this.onControllerData.bind(this));
+        this.controllerInputs.length = 0;
+        for (let i = 0; i < 16; i++) {
+            const channelId = TransportChannelId[`CONTROLLER${i}`];
+            this.controllerInputs[i] = this.getDataChannel(transport, channelId);
+        }
+        // Register all controllers, because the missing channel could've dropped controller connect events
+        this.registerBufferedControllers();
+    }
+    setConfig(config) {
+        Object.assign(this.config, config);
+        // Touch
+        this.primaryTouch = null;
+        this.touchTracker.clear();
+    }
+    getConfig() {
+        return this.config;
+    }
+    getCapabilities() {
+        return this.capabilities;
+    }
+    // -- External Event Listeners
+    addScreenKeyboardVisibleEvent(listener) {
+        this.eventTarget.addEventListener("ml-screenkeyboardvisible", listener);
+    }
+    // -- On Stream Start
+    onStreamStart(capabilities, streamerSize) {
+        this.connected = true;
+        this.capabilities = capabilities;
+        this.streamerSize = streamerSize;
+        this.registerBufferedControllers();
+    }
+    onKeyDown(event) {
+        this.sendKeyEvent(true, event);
+    }
+    onKeyUp(event) {
+        this.sendKeyEvent(false, event);
+    }
+    onPaste(event) {
+        const data = event.clipboardData;
+        if (!data) {
+            return;
+        }
+        console.debug("PASTE", data);
+        const text = data.getData("text/plain");
+        if (text) {
+            console.debug("PASTE TEXT", text);
+            // Before sending text raise all keys
+            this.raiseAllKeys();
+            this.sendText(text);
+        }
+    }
+    sendKeyEvent(isDown, event) {
+        const key = convertToKey(event);
+        if (key == null) {
+            return;
+        }
+        if (isDown) {
+            if (this.pressedKeys.has(key)) {
+                return;
+            }
+            this.pressedKeys.add(key);
+        }
+        else {
+            if (!this.pressedKeys.has(key)) {
+                return;
+            }
+            this.pressedKeys.delete(key);
+        }
+        const modifiers = convertToModifiers(event);
+        if ("debug" in console) {
+            console.debug(isDown ? "DOWN" : "UP", event.code, convertToKey(event), convertToModifiers(event).toString(16));
+        }
+        this.sendKey(isDown, key, modifiers);
+    }
+    raiseAllKeys() {
+        for (const key of this.pressedKeys) {
+            this.sendKey(false, key, 0);
+        }
+        this.pressedKeys.clear();
+    }
+    // Note: key = StreamKeys.VK_, modifiers = StreamKeyModifiers.
+    sendKey(isDown, key, modifiers) {
+        this.buffer.reset();
+        this.buffer.putU8(0);
+        this.buffer.putBool(isDown);
+        this.buffer.putU8(modifiers);
+        this.buffer.putU16(key);
+        trySendChannel(this.keyboard, this.buffer);
+    }
+    sendText(text) {
+        this.buffer.reset();
+        this.buffer.putU8(1);
+        this.buffer.putU8(text.length);
+        this.buffer.putUtf8Raw(text);
+        trySendChannel(this.keyboard, this.buffer);
+    }
+    // -- Mouse
+    onMouseDown(event, rect) {
+        const button = convertToButton(event);
+        if (button == null) {
+            return;
+        }
+        if (this.config.mouseMode == "relative" || this.config.mouseMode == "follow") {
+            this.sendMouseButton(true, button);
+        }
+        else if (this.config.mouseMode == "localCursor") {
+            this.initializeLocalCursor(rect, event.clientX, event.clientY);
+            this.sendLocalCursorPosition(true);
+            this.sendMouseButton(true, button);
+        }
+        else if (this.config.mouseMode == "pointAndDrag") {
+            this.sendMousePositionClientCoordinates(event.clientX, event.clientY, rect, true, button);
+        }
+    }
+    onMouseUp(event) {
+        const button = convertToButton(event);
+        if (button == null) {
+            return;
+        }
+        if (this.config.mouseMode == "relative" || this.config.mouseMode == "follow" || this.config.mouseMode == "localCursor") {
+            this.sendMouseButton(false, button);
+        }
+        else if (this.config.mouseMode == "pointAndDrag") {
+            this.sendMouseButton(false, button);
+        }
+    }
+    onMouseMove(event, rect) {
+        if (this.config.mouseMode == "relative") {
+            this.sendMouseMoveClientCoordinates(event.movementX, event.movementY, rect);
+        }
+        else if (this.config.mouseMode == "follow") {
+            this.sendMousePositionClientCoordinates(event.clientX, event.clientY, rect, false);
+        }
+        else if (this.config.mouseMode == "localCursor") {
+            this.initializeLocalCursor(rect, event.clientX, event.clientY);
+            this.moveLocalCursorClientCoordinates(event.movementX, event.movementY, rect, false);
+        }
+        else if (this.config.mouseMode == "pointAndDrag") {
+            if (event.buttons) {
+                // some button pressed
+                this.sendMouseMoveClientCoordinates(event.movementX, event.movementY, rect);
+            }
+        }
+    }
+    onMouseWheel(event) {
+        this.sendAccumulatedScroll(event.deltaX, -event.deltaY);
+    }
+    sendMouseMove(movementX, movementY) {
+        this.buffer.reset();
+        this.buffer.putU8(0);
+        this.buffer.putI16(movementX);
+        this.buffer.putI16(movementY);
+        trySendChannel(this.mouseRelative, this.buffer);
+    }
+    sendMouseMoveClientCoordinates(movementX, movementY, rect) {
+        const scaledMovementX = movementX / rect.width * this.streamerSize[0];
+        const scaledMovementY = movementY / rect.height * this.streamerSize[1];
+        this.sendMouseMove(scaledMovementX, scaledMovementY);
+    }
+    sendMousePosition(x, y, referenceWidth, referenceHeight, reliable) {
+        this.buffer.reset();
+        this.buffer.putU8(1);
+        this.buffer.putI16(x);
+        this.buffer.putI16(y);
+        this.buffer.putI16(referenceWidth);
+        this.buffer.putI16(referenceHeight);
+        if (reliable) {
+            trySendChannel(this.mouseReliable, this.buffer);
+        }
+        else {
+            trySendChannel(this.mouseAbsolute, this.buffer);
+        }
+    }
+    sendMousePositionClientCoordinates(clientX, clientY, rect, reliable, mouseButton) {
+        const position = this.calcNormalizedPosition(clientX, clientY, rect);
+        if (position) {
+            const [x, y] = position;
+            this.sendMousePosition(x * 4096.0, y * 4096.0, 4096.0, 4096.0, reliable);
+            if (mouseButton != undefined) {
+                this.sendMouseButton(true, mouseButton);
+            }
+        }
+    }
+    initializeLocalCursor(rect, clientX, clientY) {
+        if (this.localCursorPosition) {
+            return;
+        }
+        if (clientX != null && clientY != null) {
+            const position = this.calcNormalizedPosition(clientX, clientY, rect);
+            if (position) {
+                this.localCursorPosition = [
+                    position[0] * this.streamerSize[0],
+                    position[1] * this.streamerSize[1],
+                ];
+                return;
+            }
+        }
+        this.localCursorPosition = [
+            this.streamerSize[0] / 2,
+            this.streamerSize[1] / 2,
+        ];
+    }
+    clampLocalCursorPosition() {
+        if (!this.localCursorPosition) {
+            return;
+        }
+        this.localCursorPosition[0] = Math.min(Math.max(this.localCursorPosition[0], 0), this.streamerSize[0]);
+        this.localCursorPosition[1] = Math.min(Math.max(this.localCursorPosition[1], 0), this.streamerSize[1]);
+    }
+    sendLocalCursorPosition(reliable) {
+        if (!this.localCursorPosition) {
+            return;
+        }
+        this.sendMousePosition(this.localCursorPosition[0], this.localCursorPosition[1], this.streamerSize[0], this.streamerSize[1], reliable);
+    }
+    moveLocalCursorClientCoordinates(movementX, movementY, rect, reliable) {
+        if (this.streamerSize[0] <= 0 || this.streamerSize[1] <= 0 || rect.width <= 0 || rect.height <= 0) {
+            return;
+        }
+        this.initializeLocalCursor(rect);
+        if (!this.localCursorPosition) {
+            return;
+        }
+        this.localCursorPosition[0] += movementX / rect.width * this.streamerSize[0] * this.config.localCursorSensitivity;
+        this.localCursorPosition[1] += movementY / rect.height * this.streamerSize[1] * this.config.localCursorSensitivity;
+        this.clampLocalCursorPosition();
+        this.sendLocalCursorPosition(reliable);
+    }
+    // Note: button = StreamMouseButton.
+    sendMouseButton(isDown, button) {
+        this.buffer.reset();
+        this.buffer.putU8(2);
+        this.buffer.putBool(isDown);
+        this.buffer.putU8(button);
+        trySendChannel(this.mouseReliable, this.buffer);
+    }
+    sendMouseWheelHighRes(deltaX, deltaY) {
+        this.buffer.reset();
+        this.buffer.putU8(3);
+        this.buffer.putI16(deltaX);
+        this.buffer.putI16(deltaY);
+        trySendChannel(this.mouseRelative, this.buffer);
+    }
+    sendMouseWheel(deltaX, deltaY) {
+        this.buffer.reset();
+        this.buffer.putU8(4);
+        this.buffer.putI8(deltaX);
+        this.buffer.putI8(deltaY);
+        trySendChannel(this.mouseRelative, this.buffer);
+    }
+    resetScrollRemainder() {
+        this.scrollRemainderX = 0;
+        this.scrollRemainderY = 0;
+    }
+    sendAccumulatedScroll(deltaX, deltaY) {
+        this.scrollRemainderX += deltaX;
+        this.scrollRemainderY += deltaY;
+        const integerX = Math.trunc(this.scrollRemainderX);
+        const integerY = Math.trunc(this.scrollRemainderY);
+        if (integerX == 0 && integerY == 0) {
+            return;
+        }
+        this.scrollRemainderX -= integerX;
+        this.scrollRemainderY -= integerY;
+        if (this.config.mouseScrollMode == "highres") {
+            this.sendMouseWheelHighRes(integerX, integerY);
+        }
+        else if (this.config.mouseScrollMode == "normal") {
+            this.sendMouseWheel(integerX, integerY);
+        }
+    }
+    onTouchData(data) {
+        const buffer = new ByteBuffer(new Uint8Array(data));
+        this.touchSupported = buffer.getBool();
+    }
+    getLocalCursorState() {
+        if ((this.config.touchMode != "localCursor" && this.config.mouseMode != "localCursor") ||
+            !this.localCursorPosition ||
+            this.streamerSize[0] <= 0 ||
+            this.streamerSize[1] <= 0) {
+            return { visible: false, x: 0, y: 0 };
+        }
+        return {
+            visible: true,
+            x: this.localCursorPosition[0] / this.streamerSize[0],
+            y: this.localCursorPosition[1] / this.streamerSize[1],
+        };
+    }
+    updateTouchTracker(touch) {
+        const oldTouch = this.touchTracker.get(touch.identifier);
+        if (!oldTouch) {
+            this.touchTracker.set(touch.identifier, {
+                startTime: Date.now(),
+                originX: touch.clientX,
+                originY: touch.clientY,
+                x: touch.clientX,
+                y: touch.clientY,
+                mouseClicked: null,
+                mouseMoved: false,
+            });
+        }
+        else {
+            oldTouch.x = touch.clientX;
+            oldTouch.y = touch.clientY;
+        }
+    }
+    calcTouchTime(touch) {
+        return Date.now() - touch.startTime;
+    }
+    calcTouchOriginDistance(touch, oldTouch) {
+        if ("clientX" in touch) {
+            return Math.hypot(touch.clientX - oldTouch.originX, touch.clientY - oldTouch.originY);
+        }
+        else {
+            return Math.hypot(touch.x - oldTouch.originX, touch.y - oldTouch.originY);
+        }
+    }
+    shouldStartTwoTouchScroll(activeTouch) {
+        if (this.touchTracker.size != 2) {
+            return false;
+        }
+        for (const [id, trackedTouch] of this.touchTracker.entries()) {
+            const touchForDistance = activeTouch && activeTouch.identifier == id
+                ? activeTouch
+                : trackedTouch;
+            if (this.calcTouchOriginDistance(touchForDistance, trackedTouch) > TWO_TOUCH_SCROLL_TRIGGER_DISTANCE) {
+                return true;
+            }
+        }
+        return false;
+    }
+    onTouchStart(event, rect) {
+        if (this.touchTracker.size == 0) {
+            this.touchGestureSuppressClick = false;
+        }
+        for (const touch of event.changedTouches) {
+            this.updateTouchTracker(touch);
+        }
+        if (this.config.touchMode == "touch") {
+            for (const touch of event.changedTouches) {
+                this.sendTouch(0, touch, rect);
+            }
+        }
+        else if (this.config.touchMode == "mouseRelative" || this.config.touchMode == "localCursor" || this.config.touchMode == "pointAndDrag") {
+            // Set primary touch if it doesn't exists currently
+            for (const touch of event.changedTouches) {
+                if (this.primaryTouch == null) {
+                    this.primaryTouch = touch.identifier;
+                    this.touchMouseAction = "default";
+                    if (this.config.touchMode == "localCursor") {
+                        this.initializeLocalCursor(rect, touch.clientX, touch.clientY);
+                    }
+                }
+            }
+            const primaryTouch = this.primaryTouch != null && this.touchTracker.get(this.primaryTouch);
+            // Detect dragging in mouse relative
+            if ((this.config.touchMode == "mouseRelative" || this.config.touchMode == "localCursor") && primaryTouch && this.nextTouchDoubleTap) {
+                if (primaryTouch.mouseClicked == null) {
+                    this.sendMouseButton(true, StreamMouseButton.LEFT);
+                    primaryTouch.mouseClicked = StreamMouseButton.LEFT;
+                }
+                this.touchMouseAction = "drag";
+                this.nextTouchDoubleTap = false;
+            }
+            // Detect scrolling
+            if (this.touchTracker.size == 3) {
+                this.touchMouseAction = "screenKeyboard";
+                this.touchGestureSuppressClick = true;
+            }
+        }
+    }
+    onTouchUpdate(rect) {
+        if (this.primaryTouch == null) {
+            return;
+        }
+        const touch = this.touchTracker.get(this.primaryTouch);
+        if (!touch) {
+            return;
+        }
+        const time = this.calcTouchTime(touch);
+        if (this.config.touchMode == "pointAndDrag") {
+            if (this.touchMouseAction == "default" && !touch.mouseMoved && time >= TOUCH_AS_CLICK_MIN_TIME_MS) {
+                this.sendMousePositionClientCoordinates(touch.originX, touch.originY, rect, true);
+                touch.mouseMoved = true;
+            }
+        }
+        else if ((this.config.touchMode == "mouseRelative" || this.config.touchMode == "localCursor") &&
+            this.touchTracker.size == 1 &&
+            this.touchMouseAction == "default" &&
+            !touch.mouseMoved &&
+            touch.mouseClicked == null &&
+            time >= TOUCH_AS_CLICK_MAX_TIME_MS) {
+            this.touchMouseAction = "longPress";
+            this.nextTouchDoubleTap = false;
+        }
+    }
+    onTouchMove(event, rect) {
+        if (this.config.touchMode == "touch") {
+            for (const touch of event.changedTouches) {
+                this.sendTouch(1, touch, rect);
+            }
+        }
+        else if (this.config.touchMode == "mouseRelative" || this.config.touchMode == "localCursor" || this.config.touchMode == "pointAndDrag") {
+            for (const touch of event.changedTouches) {
+                if (this.primaryTouch != touch.identifier) {
+                    continue;
+                }
+                const oldTouch = this.touchTracker.get(this.primaryTouch);
+                if (!oldTouch) {
+                    continue;
+                }
+                const movementX = touch.clientX - oldTouch.x;
+                const movementY = touch.clientY - oldTouch.y;
+                if (this.touchMouseAction == "default") {
+                    if (this.shouldStartTwoTouchScroll(touch)) {
+                        this.touchMouseAction = "scroll";
+                        this.touchGestureSuppressClick = true;
+                        this.resetScrollRemainder();
+                        for (const trackedTouch of this.touchTracker.values()) {
+                            trackedTouch.mouseMoved = true;
+                        }
+                        if (oldTouch.mouseClicked != null) {
+                            this.sendMouseButton(false, oldTouch.mouseClicked);
+                            oldTouch.mouseClicked = null;
+                        }
+                        if (this.config.touchMode == "pointAndDrag" && this.primaryTouch != null) {
+                            const primaryTouch = this.touchTracker.get(this.primaryTouch);
+                            if (primaryTouch) {
+                                let middleX = 0;
+                                let middleY = 0;
+                                for (const trackedTouch of this.touchTracker.values()) {
+                                    middleX += trackedTouch.x;
+                                    middleY += trackedTouch.y;
+                                }
+                                middleX += touch.clientX - oldTouch.x;
+                                middleY += touch.clientY - oldTouch.y;
+                                middleX /= 2;
+                                middleY /= 2;
+                                primaryTouch.mouseMoved = true;
+                                this.sendMousePositionClientCoordinates(middleX, middleY, rect, true);
+                            }
+                        }
+                    }
+                }
+                if (this.touchMouseAction == "default") {
+                    const touchOriginDistance = this.calcTouchOriginDistance(touch, oldTouch);
+                    // Normal mouse relative movement
+                    if (this.config.touchMode == "mouseRelative") {
+                        this.sendMouseMoveClientCoordinates(movementX, movementY, rect);
+                        if (touchOriginDistance > TOUCH_AS_CLICK_MAX_DISTANCE) {
+                            oldTouch.mouseMoved = true;
+                            this.touchGestureSuppressClick = true;
+                        }
+                    }
+                    else if (this.config.touchMode == "localCursor") {
+                        this.moveLocalCursorClientCoordinates(movementX, movementY, rect, false);
+                        if (touchOriginDistance > TOUCH_AS_CLICK_MAX_DISTANCE) {
+                            oldTouch.mouseMoved = true;
+                            this.touchGestureSuppressClick = true;
+                        }
+                    }
+                    // Point and Drag
+                    // If we are over the touch as click distance go to the origin and drag
+                    else if (this.config.touchMode == "pointAndDrag" && touchOriginDistance > TOUCH_AS_CLICK_MAX_DISTANCE) {
+                        if (!oldTouch.mouseMoved) {
+                            this.sendMousePositionClientCoordinates(oldTouch.originX, oldTouch.originY, rect, true);
+                            oldTouch.mouseMoved = true;
+                        }
+                        if (oldTouch.mouseClicked == null) {
+                            this.sendMouseButton(true, StreamMouseButton.LEFT);
+                            oldTouch.mouseClicked = StreamMouseButton.LEFT;
+                        }
+                        this.touchMouseAction = "drag";
+                    }
+                }
+                else if (this.touchMouseAction == "longPress") {
+                    if (movementX != 0 || movementY != 0) {
+                        this.touchMouseAction = "drag";
+                        this.touchGestureSuppressClick = true;
+                        oldTouch.mouseMoved = true;
+                        oldTouch.mouseClicked = StreamMouseButton.LEFT;
+                        this.sendMouseButton(true, StreamMouseButton.LEFT);
+                        if (this.config.touchMode == "localCursor") {
+                            this.moveLocalCursorClientCoordinates(movementX, movementY, rect, false);
+                        }
+                        else {
+                            this.sendMouseMoveClientCoordinates(movementX, movementY, rect);
+                        }
+                    }
+                }
+                else if (this.touchMouseAction == "drag") {
+                    // Do the dragging
+                    if (this.config.touchMode == "localCursor") {
+                        this.moveLocalCursorClientCoordinates(movementX, movementY, rect, false);
+                    }
+                    else {
+                        this.sendMouseMoveClientCoordinates(movementX, movementY, rect);
+                    }
+                }
+                else if (this.touchMouseAction == "scroll") {
+                    // inverting horizontal scroll
+                    if (this.config.mouseScrollMode == "highres") {
+                        this.sendAccumulatedScroll(-movementX * TOUCH_HIGH_RES_SCROLL_MULTIPLIER, movementY * TOUCH_HIGH_RES_SCROLL_MULTIPLIER);
+                    }
+                    else if (this.config.mouseScrollMode == "normal") {
+                        this.sendAccumulatedScroll(-movementX * TOUCH_SCROLL_MULTIPLIER, movementY * TOUCH_SCROLL_MULTIPLIER);
+                    }
+                }
+                else if (this.touchMouseAction == "screenKeyboard") {
+                    // calculate if we should open the screen keyboard
+                    const distanceY = touch.clientY - oldTouch.originY;
+                    if (distanceY < -TOUCHES_AS_KEYBOARD_DISTANCE) {
+                        const customEvent = new CustomEvent("ml-screenkeyboardvisible", {
+                            detail: { visible: true }
+                        });
+                        this.eventTarget.dispatchEvent(customEvent);
+                    }
+                    else if (distanceY > TOUCHES_AS_KEYBOARD_DISTANCE) {
+                        const customEvent = new CustomEvent("ml-screenkeyboardvisible", {
+                            detail: { visible: false }
+                        });
+                        this.eventTarget.dispatchEvent(customEvent);
+                    }
+                }
+            }
+        }
+        for (const touch of event.changedTouches) {
+            this.updateTouchTracker(touch);
+        }
+    }
+    onTouchEnd(event, rect) {
+        if (this.config.touchMode == "touch") {
+            for (const touch of event.changedTouches) {
+                this.sendTouch(2, touch, rect);
+            }
+        }
+        else if (this.config.touchMode == "mouseRelative" || this.config.touchMode == "localCursor" || this.config.touchMode == "pointAndDrag") {
+            const endingScroll = this.touchMouseAction == "scroll" && this.touchTracker.size == 2;
+            const endingTwoTouchTap = !this.touchGestureSuppressClick && this.touchMouseAction == "default" && this.touchTracker.size == 2;
+            let endingTwoTouchTapShouldRightClick = false;
+            let handledTwoTouchTap = false;
+            if (endingTwoTouchTap) {
+                endingTwoTouchTapShouldRightClick = true;
+                for (const trackedTouch of this.touchTracker.values()) {
+                    if (this.calcTouchTime(trackedTouch) > TOUCH_AS_CLICK_MAX_TIME_MS) {
+                        endingTwoTouchTapShouldRightClick = false;
+                        break;
+                    }
+                }
+            }
+            for (const touch of event.changedTouches) {
+                if (endingTwoTouchTap) {
+                    if (!handledTwoTouchTap && endingTwoTouchTapShouldRightClick) {
+                        this.sendMouseButton(true, StreamMouseButton.RIGHT);
+                        this.sendMouseButton(false, StreamMouseButton.RIGHT);
+                    }
+                    handledTwoTouchTap = true;
+                    this.primaryTouch = null;
+                    this.nextTouchDoubleTap = false;
+                    continue;
+                }
+                if (this.primaryTouch != touch.identifier) {
+                    continue;
+                }
+                const oldTouch = this.touchTracker.get(this.primaryTouch);
+                this.primaryTouch = null;
+                if (oldTouch) {
+                    if (endingScroll) {
+                        continue;
+                    }
+                    if (this.touchMouseAction == "longPress") {
+                        if (this.touchGestureSuppressClick) {
+                            this.nextTouchDoubleTap = false;
+                            continue;
+                        }
+                        this.sendMouseButton(true, StreamMouseButton.RIGHT);
+                        this.sendMouseButton(false, StreamMouseButton.RIGHT);
+                        this.nextTouchDoubleTap = false;
+                        continue;
+                    }
+                    if (this.touchMouseAction == "drag") {
+                        if (oldTouch.mouseClicked != null) {
+                            this.sendMouseButton(false, oldTouch.mouseClicked);
+                            oldTouch.mouseClicked = null;
+                        }
+                        this.nextTouchDoubleTap = false;
+                        continue;
+                    }
+                    const touchTime = this.calcTouchTime(oldTouch);
+                    const touchOriginDistance = this.calcTouchOriginDistance(touch, oldTouch);
+                    const maybeDoubleTap = !this.touchGestureSuppressClick && touchTime < DOUBLE_TAP_FIRST_TAP_MAX_TIME_MS;
+                    // point and drag: Before making a click we should move the mouse to the position
+                    if (this.config.touchMode == "pointAndDrag" && !oldTouch.mouseMoved) {
+                        this.sendMousePositionClientCoordinates(touch.clientX, touch.clientY, rect, true);
+                    }
+                    const doClick = (maybeDoubleTap) => {
+                        // See if we should make a click
+                        if (touchOriginDistance < TOUCH_AS_CLICK_MAX_DISTANCE &&
+                            !this.touchGestureSuppressClick &&
+                            !oldTouch.mouseMoved &&
+                            !maybeDoubleTap) {
+                            // Should we right or left click?
+                            let mouseButton;
+                            if (touchTime > TOUCH_AS_CLICK_MAX_TIME_MS) {
+                                mouseButton = StreamMouseButton.RIGHT;
+                            }
+                            else {
+                                mouseButton = StreamMouseButton.LEFT;
+                            }
+                            this.sendMouseButton(true, mouseButton);
+                            oldTouch.mouseClicked = mouseButton;
+                        }
+                        // Reset mouse click to neutral
+                        if (oldTouch.mouseClicked != null) {
+                            this.sendMouseButton(false, oldTouch.mouseClicked);
+                        }
+                    };
+                    doClick(maybeDoubleTap);
+                    if (maybeDoubleTap) {
+                        this.nextTouchDoubleTap = true;
+                        // Schedule the click if it's not a double tap
+                        setTimeout(() => {
+                            if (this.primaryTouch == null) {
+                                // no click present -> no double click -> We need to do the actual click
+                                doClick(false);
+                                // it cannot be a double tap
+                                this.nextTouchDoubleTap = false;
+                            }
+                        }, DOUBLE_TAP_SECOND_TAP_MAX_TIME_MS);
+                    }
+                    else {
+                        this.nextTouchDoubleTap = false;
+                    }
+                }
+            }
+        }
+        for (const touch of event.changedTouches) {
+            this.touchTracker.delete(touch.identifier);
+        }
+        if (this.touchMouseAction == "scroll" && this.touchTracker.size < 2) {
+            this.touchMouseAction = "default";
+            this.resetScrollRemainder();
+        }
+        if (this.touchTracker.size == 0) {
+            this.touchGestureSuppressClick = false;
+        }
+    }
+    onTouchCancel(event, rect) {
+        if (this.config.touchMode == "touch") {
+            for (const touch of event.changedTouches) {
+                this.sendTouch(2, touch, rect);
+            }
+        }
+        else {
+            for (const trackedTouch of this.touchTracker.values()) {
+                if (trackedTouch.mouseClicked != null) {
+                    this.sendMouseButton(false, trackedTouch.mouseClicked);
+                    trackedTouch.mouseClicked = null;
+                }
+            }
+        }
+        this.touchTracker.clear();
+        this.primaryTouch = null;
+        this.touchMouseAction = "default";
+        this.nextTouchDoubleTap = false;
+        this.touchGestureSuppressClick = false;
+        this.resetScrollRemainder();
+    }
+    calcNormalizedPosition(clientX, clientY, rect) {
+        const x = (clientX - rect.left) / rect.width;
+        const y = (clientY - rect.top) / rect.height;
+        if (x < 0 || x > 1.0 || y < 0 || y > 1.0) {
+            // invalid touch
+            return null;
+        }
+        return [x, y];
+    }
+    sendTouch(type, touch, rect) {
+        this.buffer.reset();
+        this.buffer.putU8(type);
+        this.buffer.putU32(touch.identifier);
+        const position = this.calcNormalizedPosition(touch.clientX, touch.clientY, rect);
+        if (!position) {
+            return;
+        }
+        const [x, y] = position;
+        this.buffer.putF32(x);
+        this.buffer.putF32(y);
+        this.buffer.putF32(touch.force);
+        this.buffer.putF32(touch.radiusX);
+        this.buffer.putF32(touch.radiusY);
+        this.buffer.putU16(touch.rotationAngle);
+        trySendChannel(this.touch, this.buffer);
+    }
+    isTouchSupported() {
+        return this.touchSupported;
+    }
+    getCurrentPredictedTouchAction() {
+        return this.touchMouseAction;
+    }
+    registerBufferedControllers() {
+        const gamepads = navigator.getGamepads();
+        for (const index of this.bufferedControllers.splice(0)) {
+            const gamepad = gamepads[index];
+            if (gamepad) {
+                this.onGamepadConnect(gamepad);
+            }
+        }
+    }
+    collectActuators(gamepad) {
+        const actuators = [];
+        if ("vibrationActuator" in gamepad && gamepad.vibrationActuator) {
+            actuators.push(gamepad.vibrationActuator);
+        }
+        if ("hapticActuators" in gamepad && gamepad.hapticActuators) {
+            const hapticActuators = gamepad.hapticActuators;
+            actuators.push(...hapticActuators);
+        }
+        return actuators;
+    }
+    onGamepadConnect(gamepad) {
+        if (!this.connected || !this.controllers) {
+            this.bufferedControllers.push(gamepad.index);
+            return;
+        }
+        if (this.gamepads.find(value => (value === null || value === void 0 ? void 0 : value.gamepadIndex) == gamepad.index)) {
+            return;
+        }
+        let id = -1;
+        for (let i = 0; i < this.gamepads.length; i++) {
+            if (this.gamepads[i] == null) {
+                this.gamepads[i] = { gamepadIndex: gamepad.index, oldState: emptyGamepadState() };
+                id = i;
+                break;
+            }
+        }
+        if (id == -1) {
+            id = this.gamepads.length;
+            this.gamepads.push({ gamepadIndex: gamepad.index, oldState: emptyGamepadState() });
+        }
+        // Start Rumble interval
+        if (this.gamepadRumbleInterval == null) {
+            this.gamepadRumbleInterval = window.setInterval(this.onGamepadRumbleInterval.bind(this), CONTROLLER_RUMBLE_INTERVAL_MS - 10);
+        }
+        // Reset rumble
+        this.gamepadRumbleCurrent[0] = { lowFrequencyMotor: 0, highFrequencyMotor: 0, leftTrigger: 0, rightTrigger: 0 };
+        let capabilities = 0;
+        // Rumble capabilities
+        for (const actuator of this.collectActuators(gamepad)) {
+            if ("effects" in actuator) {
+                const supportedEffects = actuator.effects;
+                for (const effect of supportedEffects) {
+                    if (effect == "dual-rumble") {
+                        capabilities = StreamControllerCapabilities.CAPABILITY_RUMBLE;
+                    }
+                    else if (effect == "trigger-rumble") {
+                        capabilities = StreamControllerCapabilities.CAPABILITY_TRIGGER_RUMBLE;
+                    }
+                }
+            }
+            else if ("type" in actuator && (actuator.type == "vibration" || actuator.type == "dual-rumble")) {
+                capabilities = StreamControllerCapabilities.CAPABILITY_RUMBLE;
+            }
+            else if ("playEffect" in actuator && typeof actuator.playEffect == "function") {
+                // we're just hoping at this point
+                capabilities = StreamControllerCapabilities.CAPABILITY_RUMBLE | StreamControllerCapabilities.CAPABILITY_TRIGGER_RUMBLE;
+            }
+            else if ("pulse" in actuator && typeof actuator.pulse == "function") {
+                capabilities = StreamControllerCapabilities.CAPABILITY_RUMBLE;
+            }
+        }
+        this.sendControllerAdd(this.gamepads.length - 1, SUPPORTED_BUTTONS, capabilities);
+        if (gamepad.mapping != "standard") {
+            console.warn(`[Gamepad]: Unable to read values of gamepad with mapping ${gamepad.mapping}`);
+        }
+    }
+    onGamepadDisconnect(event) {
+        var _a;
+        const index = this.gamepads.findIndex(value => (value === null || value === void 0 ? void 0 : value.gamepadIndex) == event.gamepad.index);
+        if (index != -1) {
+            const id = (_a = this.gamepads[index]) === null || _a === void 0 ? void 0 : _a.gamepadIndex;
+            if (id != null) {
+                this.sendControllerRemove(id);
+            }
+            this.gamepads[index] = null;
+        }
+    }
+    onGamepadUpdate() {
+        if (this.config.controllerConfig.sendIntervalOverride != null) {
+            const now = performance.now();
+            if (now - this.lastGamepadUpdate < (1000 / this.config.controllerConfig.sendIntervalOverride)) {
+                return;
+            }
+            this.lastGamepadUpdate = performance.now();
+        }
+        for (let gamepadId = 0; gamepadId < this.gamepads.length; gamepadId++) {
+            const oldGamepadState = this.gamepads[gamepadId];
+            if (oldGamepadState == null) {
+                return;
+            }
+            const gamepad = navigator.getGamepads()[oldGamepadState.gamepadIndex];
+            if (!gamepad) {
+                continue;
+            }
+            if (gamepad.mapping != "standard") {
+                continue;
+            }
+            const state = extractGamepadState(gamepad, this.config.controllerConfig);
+            if (state == oldGamepadState.oldState) {
+                continue;
+            }
+            oldGamepadState.oldState = state;
+            this.sendController(gamepadId, state);
+        }
+    }
+    onControllerData(data) {
+        var _a, _b;
+        this.buffer.reset();
+        this.buffer.putU8Array(new Uint8Array(data));
+        this.buffer.flip();
+        // TODO: maybe move this into their respective controller channels?
+        const ty = this.buffer.getU8();
+        if (ty == 0) {
+            // Rumble
+            const id = this.buffer.getU8();
+            const lowFrequencyMotor = this.buffer.getU16() / U16_MAX;
+            const highFrequencyMotor = this.buffer.getU16() / U16_MAX;
+            const gamepadIndex = (_a = this.gamepads[id]) === null || _a === void 0 ? void 0 : _a.gamepadIndex;
+            if (gamepadIndex == null) {
+                return;
+            }
+            this.setGamepadEffect(gamepadIndex, "dual-rumble", { lowFrequencyMotor, highFrequencyMotor });
+        }
+        else if (ty == 1) {
+            // Trigger Rumble
+            const id = this.buffer.getU8();
+            const leftTrigger = this.buffer.getU16() / U16_MAX;
+            const rightTrigger = this.buffer.getU16() / U16_MAX;
+            const gamepadIndex = (_b = this.gamepads[id]) === null || _b === void 0 ? void 0 : _b.gamepadIndex;
+            if (gamepadIndex == null) {
+                return;
+            }
+            this.setGamepadEffect(gamepadIndex, "trigger-rumble", { leftTrigger, rightTrigger });
+        }
+    }
+    setGamepadEffect(id, _ty, params) {
+        const rumble = this.gamepadRumbleCurrent[id];
+        Object.assign(rumble, params);
+    }
+    onGamepadRumbleInterval() {
+        var _a;
+        for (let id = 0; id < this.gamepads.length; id++) {
+            const gamepadIndex = (_a = this.gamepads[id]) === null || _a === void 0 ? void 0 : _a.gamepadIndex;
+            if (gamepadIndex == null) {
+                continue;
+            }
+            const rumble = this.gamepadRumbleCurrent[gamepadIndex];
+            const gamepad = navigator.getGamepads()[gamepadIndex];
+            if (gamepad && rumble) {
+                this.refreshGamepadRumble(rumble, gamepad);
+            }
+        }
+    }
+    refreshGamepadRumble(rumble, gamepad) {
+        // Browsers are making this more complicated than it is
+        const actuators = this.collectActuators(gamepad);
+        for (const actuator of actuators) {
+            if ("effects" in actuator) {
+                const supportedEffects = actuator.effects;
+                for (const effect of supportedEffects) {
+                    if (effect == "dual-rumble") {
+                        actuator.playEffect("dual-rumble", {
+                            duration: CONTROLLER_RUMBLE_INTERVAL_MS,
+                            weakMagnitude: rumble.lowFrequencyMotor,
+                            strongMagnitude: rumble.highFrequencyMotor
+                        });
+                    }
+                    else if (effect == "trigger-rumble") {
+                        actuator.playEffect("trigger-rumble", {
+                            duration: CONTROLLER_RUMBLE_INTERVAL_MS,
+                            leftTrigger: rumble.leftTrigger,
+                            rightTrigger: rumble.rightTrigger
+                        });
+                    }
+                }
+            }
+            else if ("type" in actuator && (actuator.type == "vibration" || actuator.type == "dual-rumble")) {
+                actuator.playEffect(actuator.type, {
+                    duration: CONTROLLER_RUMBLE_INTERVAL_MS,
+                    weakMagnitude: rumble.lowFrequencyMotor,
+                    strongMagnitude: rumble.highFrequencyMotor
+                });
+            }
+            else if ("playEffect" in actuator && typeof actuator.playEffect == "function") {
+                actuator.playEffect("dual-rumble", {
+                    duration: CONTROLLER_RUMBLE_INTERVAL_MS,
+                    weakMagnitude: rumble.lowFrequencyMotor,
+                    strongMagnitude: rumble.highFrequencyMotor
+                });
+                actuator.playEffect("trigger-rumble", {
+                    duration: CONTROLLER_RUMBLE_INTERVAL_MS,
+                    leftTrigger: rumble.leftTrigger,
+                    rightTrigger: rumble.rightTrigger
+                });
+            }
+            else if ("pulse" in actuator && typeof actuator.pulse == "function") {
+                const weak = Math.min(Math.max(rumble.lowFrequencyMotor, 0), 1);
+                const strong = Math.min(Math.max(rumble.highFrequencyMotor, 0), 1);
+                const average = (weak + strong) / 2.0;
+                actuator.pulse(average, CONTROLLER_RUMBLE_INTERVAL_MS);
+            }
+        }
+    }
+    // -- Controller Sending
+    sendControllerAdd(id, supportedButtons, capabilities) {
+        this.buffer.reset();
+        this.buffer.putU8(0);
+        this.buffer.putU8(id);
+        this.buffer.putU32(supportedButtons);
+        this.buffer.putU16(capabilities);
+        if (!this.controllers) {
+            showNotification("controller channel is not yet present, controller connect event is dropped");
+        }
+        trySendChannel(this.controllers, this.buffer);
+    }
+    sendControllerRemove(id) {
+        this.buffer.reset();
+        this.buffer.putU8(1);
+        this.buffer.putU8(id);
+        trySendChannel(this.controllers, this.buffer);
+    }
+    // Values
+    // - Trigger: range 0..1
+    // - Stick: range -1..1
+    sendController(id, state) {
+        this.buffer.reset();
+        this.buffer.putU8(0);
+        this.buffer.putU32(state.buttonFlags);
+        this.buffer.putU8(Math.max(0.0, Math.min(1.0, state.leftTrigger)) * U8_MAX);
+        this.buffer.putU8(Math.max(0.0, Math.min(1.0, state.rightTrigger)) * U8_MAX);
+        this.buffer.putI16(Math.max(-1.0, Math.min(1.0, state.leftStickX)) * I16_MAX);
+        this.buffer.putI16(Math.max(-1.0, Math.min(1.0, -state.leftStickY)) * I16_MAX);
+        this.buffer.putI16(Math.max(-1.0, Math.min(1.0, state.rightStickX)) * I16_MAX);
+        this.buffer.putI16(Math.max(-1.0, Math.min(1.0, -state.rightStickY)) * I16_MAX);
+        trySendChannel(this.controllerInputs[id], this.buffer);
+    }
+}

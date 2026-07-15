@@ -1,5 +1,6 @@
 # Rust
-/target
+/target/debug
+/target/flycheck0
 finalOutput
 ignore
 
@@ -23,3 +24,9 @@ package-lock.json
 web-server.exe
 /dist11
 *.bak
+/node-streamer-proxy/files
+/target/debug
+/target/release/.fingerprint
+/target/release/build
+/target/release/deps
+*.pdb

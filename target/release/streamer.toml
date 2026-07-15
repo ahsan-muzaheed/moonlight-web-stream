@@ -1,0 +1,8 @@
+# NEW websocket mode: streamer.exe runs standalone and dials OUT to Node.
+transport   = "websocket"
+server_url  = "ws://127.0.0.1:8080/api/streamer/connect"
+streamer_id = "streamer-1"
+auth_token  = "secret123"
+
+# OLD mode (or just delete this file entirely):
+# transport = "stdio"
