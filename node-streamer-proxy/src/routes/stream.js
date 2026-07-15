@@ -97,7 +97,12 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
   const host = storage.getHostForUser(user, hostId); // throws HostNotFound/Forbidden
   if (!host.pairInfo) throw new Error("HostNotPaired");
 
-  // Confirm the requested app exists on the host.
+  // Resolve which app to launch, against the host's live app list.
+  //
+  // Prefer ?appName= when present. Sunshine derives app ids as
+  // CRC32(name + box-art), so renaming an app (or changing its image) CHANGES
+  // its id and silently breaks every saved URL. A name is stable, so links
+  // built with ?appName= keep working. ?appId= still works for old links.
   const apps = await moonlight.listApps(host, user.hostUniqueId);
   
   
@@ -211,6 +216,12 @@ function registerStreamRoutes(app, ctx) {
   const streamerPath = ctx.config.streamer.path;
   const logLevel = ctx.config.streamer.log_level;
 
+  // NEW architecture: when enabled, route the browser to a streamer that has
+  // dialed IN (registry) instead of spawning streamer.exe. Old spawn path stays
+  // the default so nothing breaks when this is off.
+  const useConnectedStreamer = ctx.config.streamer.use_connected === true;
+  const registry = ctx.streamerRegistry;
+
   // Free the host for the next user when a stream drops.
   // grace secs = 0 -> cancel immediately on disconnect.
   const cancelOnDisconnect = ctx.config.streamer.cancel_app_on_disconnect !== false;
@@ -291,29 +302,69 @@ function registerStreamRoutes(app, ctx) {
       // Tell the client which app is launching (Rust sends UpdateApp here).
       sendClientText({ UpdateApp: { app: built.app } });
 
-      streamer = new StreamerProcess(streamerPath, logLevel);
-
-      streamer.onMessage = (obj) => {
-        if (obj === "Stop") {
+      // Handler for messages coming FROM the streamer TO this browser. Same
+      // logic whether the streamer was spawned or is a connected daemon.
+      const handleStreamerMessage = (obj) => {
+        if (obj && obj.__binary) {
+          // connected-streamer binary frame (media/transport)
+          if (ws.readyState === WebSocket.OPEN) ws.send(obj.__binary, { binary: true });
+        } else if (obj === "Stop") {
           ws.close();
-        } else if (obj.WebSocket) {
+        } else if (obj && obj.WebSocket) {
           sendClientText(obj.WebSocket);
-        } else if (obj.WebSocketTransport) {
+        } else if (obj && obj.WebSocketTransport) {
+          // spawned-streamer binary frame arrives as an int array
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(Buffer.from(obj.WebSocketTransport), { binary: true });
           }
         }
       };
 
-      streamer.onExit = () => {
-        if (ws.readyState === WebSocket.OPEN) ws.close();
-      };
+      if (useConnectedStreamer) {
+        // ---- NEW: attach to a streamer that dialed in --------------------
+        // For now, single streamer: use the requested id if given, else the
+        // first connected one. (Multi-streamer picking is a later step.)
+        const wantId = (init.url_params && init.url_params.streamer) || null;
+        const conn = wantId
+          ? registry.get(wantId)
+          : registry.list().filter((s) => !s.busy).map((s) => registry.get(s.id))[0];
 
-      streamer.send({ Init: built.payload });
+        if (!conn) {
+          console.warn("[Stream] no connected streamer available");
+          sendClientText({ DebugLog: { message: "No streamer available", ty: "FatalDescription" } });
+          return ws.close();
+        }
+        if (!conn.attach(handleStreamerMessage)) {
+          console.warn(`[Stream] streamer "${conn.id}" is busy`);
+          sendClientText({ DebugLog: { message: "Streamer is busy", ty: "FatalDescription" } });
+          return ws.close();
+        }
+
+        streamer = conn; // has .send(); detached (not stopped) on close
+        console.log(`[Stream] attached to connected streamer "${conn.id}"`);
+        streamer.send({ Init: built.payload });
+      } else {
+        // ---- OLD: spawn streamer.exe as a child --------------------------
+        streamer = new StreamerProcess(streamerPath, logLevel);
+        streamer.onMessage = handleStreamerMessage;
+        streamer.onExit = () => {
+          if (ws.readyState === WebSocket.OPEN) ws.close();
+        };
+        streamer.send({ Init: built.payload });
+      }
     });
 
     ws.on("close", () => {
-      if (streamer) streamer.stop();
+      if (streamer) {
+        if (useConnectedStreamer && typeof streamer.detach === "function") {
+          // Tell the daemon to stop the current stream, then detach it so it
+          // stays connected and reusable for the next browser.
+          streamer.send("Stop");
+          streamer.detach();
+        } else if (typeof streamer.stop === "function") {
+          streamer.stop();
+        }
+      }
 
       // Killing the streamer only drops the Moonlight client; Sunshine keeps the
       // app running so it can be resumed. Explicitly cancel to free the machine.

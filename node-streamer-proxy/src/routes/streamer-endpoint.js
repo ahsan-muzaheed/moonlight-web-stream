@@ -43,17 +43,25 @@ function registerStreamerEndpoint(app, ctx, registry) {
     }, 10000);
 
     ws.on("message", (data, isBinary) => {
-      // Control messages are JSON text. Binary before registration is invalid.
+      // Treat as binary if flagged OR if the payload isn't valid JSON text.
+      // (Node<->Node ws sometimes delivers Buffers with isBinary=false.)
       if (isBinary) {
         if (!registered) return ws.close();
-        return; // (media relay handled in a later step)
+        registered.deliver({ __binary: Buffer.from(data) });
+        return;
       }
 
+      const text = data.toString();
       let msg;
       try {
-        msg = JSON.parse(data.toString());
+        msg = JSON.parse(text);
       } catch {
-        console.warn("[StreamerGW] non-JSON control message, ignoring");
+        // Not JSON: if we're registered, it's opaque binary media -> deliver.
+        if (registered) {
+          registered.deliver({ __binary: Buffer.from(data) });
+        } else {
+          console.warn("[StreamerGW] non-JSON before register, ignoring");
+        }
         return;
       }
 
@@ -79,22 +87,19 @@ function registerStreamerEndpoint(app, ctx, registry) {
         return;
       }
 
-      // ---- Post-registration control -------------------------------------
       registry.touch(registered.id);
 
-      switch (msg.type) {
-        case "ping":
-          safeSend(ws, { type: "pong" });
-          break;
-        case "pong":
-          break; // heartbeat ack, nothing to do
-        default:
-          // Signaling/relay message types will be handled in a later step.
-          // For now just log so we can see what a real streamer sends.
-          console.log(
-            `[StreamerGW] streamer "${registered.id}" sent "${msg.type}" (not yet handled)`
-          );
+      // Control frames carry a top-level "type" (ping/pong). Everything else is
+      // an IPC message ({WebSocket:...}/{WebSocketTransport:...}/"Stop") destined
+      // for the currently-attached browser session.
+      if (msg && typeof msg.type === "string") {
+        if (msg.type === "ping") safeSend(ws, { type: "pong" });
+        // "pong" and unknown control types: ignore.
+        return;
       }
+
+      // IPC message -> route to the attached browser.
+      registered.deliver(msg);
     });
 
     ws.on("close", () => {

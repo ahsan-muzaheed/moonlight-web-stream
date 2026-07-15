@@ -125,13 +125,32 @@ where
     ParentMessage: DeserializeOwned,
     Message: Send + Serialize + 'static,
 {
+    // Delegate to the generic version; stdin/stdout satisfy AsyncRead/AsyncWrite.
+    create_stream_ipc(span, stdin, stdout).await
+}
+
+/// Generic IPC over any byte stream (stdin/stdout, an in-memory duplex pipe
+/// bridged from a WebSocket, a TCP socket, ...). Same newline-delimited JSON
+/// wire format as create_process_ipc. Added for the WebSocket transport
+/// (streamer dials out to Node) without changing the stdio path.
+pub async fn create_stream_ipc<ParentMessage, Message, R, W>(
+    span: Span,
+    read: R,
+    write: W,
+) -> (IpcSender<Message>, IpcReceiver<ParentMessage>)
+where
+    ParentMessage: DeserializeOwned,
+    Message: Send + Serialize + 'static,
+    R: AsyncRead + Send + Unpin + 'static,
+    W: AsyncWriteExt + Send + Unpin + 'static,
+{
     let (sender, receiver) = channel::<Message>(10);
 
     spawn({
         let span = span.clone();
 
         async move {
-            ipc_sender(span.clone(), stdout, receiver).await;
+            ipc_sender(span.clone(), write, receiver).await;
         }
     });
 
@@ -142,7 +161,7 @@ where
         },
         IpcReceiver {
             errored: false,
-            read: create_lines(stdin),
+            read: create_lines(read),
             phantom: Default::default(),
             span,
         },

@@ -22,7 +22,34 @@ class StreamerConnection {
     this.ws = ws;
     this.connectedAt = Date.now();
     this.lastSeen = Date.now();
-    this.busy = false; // will be used later when a browser is streaming through it
+    this.busy = false; // true while a browser session is attached
+    // The currently-attached browser handler. Streamer -> browser messages are
+    // routed here. null when idle.
+    this.onMessage = null;
+  }
+
+  /**
+   * Attach a browser session. `handler(obj)` receives each decoded message the
+   * streamer sends (the {WebSocket:...}/{WebSocketTransport:...}/"Stop" enum).
+   * Returns false if the streamer is already busy with another session.
+   */
+  attach(handler) {
+    if (this.busy) return false;
+    this.busy = true;
+    this.onMessage = handler;
+    return true;
+  }
+
+  /** Detach the current browser session. Does NOT close the streamer socket -
+   *  the streamer stays connected and reusable for the next stream. */
+  detach() {
+    this.busy = false;
+    this.onMessage = null;
+  }
+
+  /** Called by the gateway when the streamer sends an IPC message. */
+  deliver(obj) {
+    if (this.onMessage) this.onMessage(obj);
   }
 
   // Same shape as StreamerProcess.send(obj) so the relay can treat both alike later.
