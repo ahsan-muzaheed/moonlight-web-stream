@@ -22,3 +22,4 @@ ipc-proxy.log
 package-lock.json
 web-server.exe
 /dist11
+*.bak
