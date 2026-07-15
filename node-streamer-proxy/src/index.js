@@ -10,11 +10,16 @@ const { Storage } = require("./storage");
 const { coreRoutes } = require("./routes/core");
 const { hostRoutes } = require("./routes/hosts");
 const { registerStreamRoutes } = require("./routes/stream");
+// NEW architecture (additive): streamers dial IN over a WebSocket.
+const { StreamerRegistry } = require("./streamer-registry");
+const { registerStreamerEndpoint } = require("./routes/streamer-endpoint");
 
 function main() {
   const config = loadConfig(process.env.CONFIG_PATH || "config.json");
   const storage = new Storage(config.storage.path);
-  const ctx = { config, storage };
+  // Registry of streamer daemons connected via the new WS gateway.
+  const streamerRegistry = new StreamerRegistry();
+  const ctx = { config, storage, streamerRegistry };
 
   const app = express();
   expressWs(app); // must run before any app.ws(...)
@@ -34,8 +39,12 @@ function main() {
   app.use("/api", coreRoutes(ctx));
   app.use("/api", hostRoutes(ctx));
 
-  // WebSocket signaling relay: /api/host/stream
+  // WebSocket signaling relay: /api/host/stream  (OLD spawn-based path - kept)
   registerStreamRoutes(app, ctx);
+
+  // NEW: gateway that streamer daemons dial into: /api/streamer/connect
+  //      + read-only /api/streamer/list. Does not affect the old path.
+  registerStreamerEndpoint(app, ctx, streamerRegistry);
 
   // Static frontend (built assets). SPA fallback to index.html.
   const staticDir = path.resolve(config.web_server.static_dir);
@@ -72,6 +81,7 @@ app.use((req, res) => res.status(404).json({ error: "Not found", path: req.path 
     console.log(`[Server] listening on http://${address}:${port}`);
     console.log(`[Server] static dir: ${staticDir}`);
     console.log(`[Server] streamer:   ${config.streamer.path}`);
+    console.log(`[Server] streamer gateway: ws://${address}:${port}/api/streamer/connect`);
   });
 }
 

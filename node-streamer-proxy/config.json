@@ -1,5 +1,7 @@
-{                                                              
-  "web_server": {                                             
+{      
+"streamer_gateway": { "token": "secret123" },
+  "web_server": {    
+"streamer_gateway": { "token": "secret123" },  
     "address": "0.0.0.0",                                     
     "port": 8080,                                             
     "url_path_prefix": "",                                   
