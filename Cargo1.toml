@@ -13,11 +13,8 @@ rustflags = ["-Zremap-cwd-prefix=.", "-Zlocation-detail=none"]
 version = "2.10.0"
 license = "GPL-3.0-or-later"
 
-
 [workspace.dependencies]
-#moonlight-common = { git = "https://github.com/MrCreativ3001/moonlight-common-rust.git", rev = "df9f1e3003fb4834dbb17a4bd4d3cf25d2fea3d9", features = [
-moonlight-common = { git = "https://github.com/ahsan-muzaheed/moonlight-common-rust.git", rev = "b4c2b4d7fd4f9f147ee3ff526a183308f570c52a", features = [
-#moonlight-common = { path = "C:/0.sunshine/moonlight-common-rust", features = [
+moonlight-common = { git = "https://github.com/MrCreativ3001/moonlight-common-rust.git", rev = "df9f1e3003fb4834dbb17a4bd4d3cf25d2fea3d9", features = [
     "tokio",
     "tokio-hyper",
     "openssl",
@@ -25,7 +22,6 @@ moonlight-common = { git = "https://github.com/ahsan-muzaheed/moonlight-common-r
     "serde",
 ], default-features = false }
 common = { path = "./common" }
-
 
 # Log
 log = "0.4.28"
