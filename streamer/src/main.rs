@@ -80,7 +80,7 @@ mod transport;
 mod video;
 mod transport_config; // NEW
 mod ws_transport;     // NEW
-
+mod app_path;
 #[tokio::main]
 async fn main() {
     let default_panic = panic::take_hook();
@@ -258,7 +258,10 @@ async fn main() {
         StreamInfo { host, app_id ,
     url_origin,
     url_path,
-    url_params,},
+    url_params,
+    app_directory: transport_cfg.app_directory.clone(),
+	
+	},
         ipc_sender.clone(),
         ipc_receiver,
         config,
@@ -295,6 +298,7 @@ struct StreamInfo {
     url_origin: String,
     url_path: String,
     url_params: HashMap<String, String>,
+	app_directory: Option<String>,   // set from loaded TransportConfig
 }
 
 struct StreamSetup {
@@ -910,6 +914,50 @@ impl StreamConnection {
 	};
 
 	info!("[Stream] launch query -> Sunshine: {launch_query}");   // so you can see it
+		// Decide launch target: path-based if owner/appName/version present, else app-id.
+		match app_path::resolve_app_exe(
+			self.info.app_directory.as_deref(),
+			&self.info.url_params,
+		) {
+			Ok(Some(exe_path)) => {
+				info!("[Stream] path-based launch: {}", exe_path.display());
+				// when ready: append to launch_query so Sunshine receives it
+				// e.g. push web_exe_path=<urlencoded exe_path> into `extra` BEFORE building launch_query
+			}
+			Ok(None) => {
+				info!("[Stream] app-id launch (no owner/appName/version params)");
+				// existing behaviour, unchanged
+			}
+			Err(err) => {
+				// Params were supplied but invalid/missing exe -> abort + tell browser.
+				let msg = format!("Cannot launch app: {err}");
+				warn!("[Stream] {msg}");
+				//aself.send_debug_fatal(&msg).await;   // sends DebugLog fatal up to Node->browser
+				
+				 ipc_sender
+				.send(StreamerIpcMessage::WebSocket(
+					StreamServerMessage::DebugLog {
+						message: msg.clone(),
+						ty: Some(LogMessageType::FatalDescription),
+					},
+				))
+				.await; 
+				
+				// Async over the WS, anytime — reuse the existing DebugLog path:
+			/* ipc_sender
+					.lock()
+					.await
+					.send(StreamerIpcMessage::WebSocket(
+						StreamServerMessage::DebugLog {
+							message: msg.clone(),
+							ty: Some(LogMessageType::FatalDescription),
+						},
+					))
+					.await;*/
+				
+				return Err(anyhow::anyhow!(msg));
+			}	
+		}
 
 	let stream_config = match host
 		.start_stream(
