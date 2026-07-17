@@ -175,6 +175,14 @@ export class WebRTCTransport implements Transport {
         } else if ((this.peer.connectionState == "failed" || this.peer.connectionState == "closed") && this.peer.iceGatheringState == "complete") {
             type = "fatal"
         }
+		
+		// onConnectionStateChange - make drops visible, not debug-only:
+const state = this.peer.connectionState
+if (state === "failed" || state === "closed") {
+    this.logger?.debug(`Peer connection ${state}`, { type: "fatal" })  // "fatal" surfaces it
+} else {
+    this.logger?.debug(`Changing Peer State to ${state}`, { type: type ?? undefined })
+}
 
         if (this.peer.connectionState == "failed" || this.peer.connectionState == "closed") {
             if (this.onclose) {
@@ -198,12 +206,12 @@ export class WebRTCTransport implements Transport {
         this.logger?.debug(`Changing Peer Signaling State to ${this.peer.signalingState}`)
     }
     private onIceConnectionStateChange() {
-        if (!this.peer) {
-            this.logger?.debug("OnIceConnectionStateChange without a peer")
-            return
-        }
-        this.logger?.debug(`Changing Peer Ice State to ${this.peer.iceConnectionState}`)
-    }
+    if (!this.peer) return
+    const s = this.peer.iceConnectionState
+    this.logger?.debug(`Peer ICE state: ${s}`, {
+        type: (s === "failed" || s === "disconnected") ? "fatal" : undefined
+    })
+}
     private onIceGatheringStateChange() {
         if (!this.peer) {
             this.logger?.debug("OnIceGatheringStateChange without a peer")
