@@ -50,7 +50,8 @@ function startApp() {
             return;
         }
         const hostId = Number.parseInt(hostIdStr);
-        const appId = Number.parseInt(appIdStr);
+        //const appId = Number.parseInt(appIdStr)
+        const appId = appIdStr ? Number.parseInt(appIdStr) : 0;
         const demoParam = queryParams.get("demoParam");
         // event propagation on overlays
         const sidebarRoot = getSidebarRoot();

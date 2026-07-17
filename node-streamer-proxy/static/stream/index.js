@@ -80,6 +80,19 @@ function isFirefox() {
 const WEBRTC_CONNECT_TIMEOUT_MS = 15000;
 const FALLBACK_RECONNECT_DELAY_MS = 500;
 export class Stream {
+    reconnect() {
+        // Cancel any pending retry/countdown — we're attempting now.
+        if (this.retryTimer) {
+            clearTimeout(this.retryTimer);
+            this.retryTimer = null;
+        }
+        if (this.retryTick) {
+            clearInterval(this.retryTick);
+            this.retryTick = null;
+        }
+        this.ws = this.createControlWebSocket();
+        this.sendInitMessage();
+    }
     constructor(api, hostId, appId, demoParam, settings, viewerScreenSize, permissions) {
         this.logger = new Logger();
         this.divElement = document.createElement("div");
@@ -91,6 +104,11 @@ export class Stream {
         this.hasConnectionComplete = false;
         this.hasVideoReady = false;
         this.hasDispatchedVideoReady = false;
+        this.retryCount = 0;
+        this.retryTimer = null;
+        this.retryTick = null; // <-- ADD THIS
+        this.MAX_RETRIES = 10;
+        this.RETRY_DELAY_MS = 3000;
         this.transport = null;
         // -- Raw Web Socket stuff
         this.wsSendBuffer = [];
@@ -104,8 +122,9 @@ export class Stream {
         this.permissions = permissions;
         this.settings = settings;
         this.streamerSize = getStreamerSize(settings, viewerScreenSize);
-        this.ws = this.createControlWebSocket();
-        this.sendInitMessage();
+        //this.ws = this.createControlWebSocket()
+        //this.sendInitMessage()
+        this.reconnect();
         // Stream Input
         const streamInputConfig = defaultStreamInputConfig();
         Object.assign(streamInputConfig, {
@@ -150,22 +169,60 @@ export class Stream {
         });
         this.eventTarget.dispatchEvent(event);
     }
+    scheduleRetry() {
+        if (this.retryCount >= this.MAX_RETRIES) {
+            this.debugLog("No machine available. Please try again later.", { type: "fatal" });
+            return;
+        }
+        this.retryCount++;
+        if (this.retryTimer)
+            clearTimeout(this.retryTimer);
+        this.retryTimer = setTimeout(() => {
+            this.debugLog(`Retrying… (attempt ${this.retryCount})`, { type: undefined });
+            this.reconnect(); // <-- see note below
+        }, this.RETRY_DELAY_MS);
+    }
     onMessage(message) {
         return __awaiter(this, void 0, void 0, function* () {
             var _a, _b;
             if ("DebugLog" in message) {
                 const debugLog = message.DebugLog;
+                // NEW: server tells us no streamer/machine is free right now. This is
+                // transient (a streamer relaunches within ~1-2s), so retry instead of
+                // giving up. We key off a marker in ty so we don't string-match the text.
+                //if (debugLog.ty === "Retryable") {
+                if (debugLog.message.includes("No machine available")) {
+                    this.debugLog("Waiting for a free machine…", { type: undefined });
+                    this.scheduleRetry();
+                    return;
+                }
                 this.debugLog(debugLog.message, {
                     type: (_a = debugLog.ty) !== null && _a !== void 0 ? _a : undefined
                 });
             }
             else if ("UpdateApp" in message) {
+                // We got attached to a streamer (a slot opened) — stop all retrying so a
+                // pending retry timer can't fire and abort this stream we're now starting.
+                this.retryCount = 0;
+                if (this.retryTimer) {
+                    clearTimeout(this.retryTimer);
+                    this.retryTimer = null;
+                }
+                if (this.retryTick) {
+                    clearInterval(this.retryTick);
+                    this.retryTick = null;
+                }
                 const event = new CustomEvent("stream-info", {
                     detail: { type: "app", app: message.UpdateApp.app }
                 });
                 this.eventTarget.dispatchEvent(event);
             }
             else if ("ConnectionComplete" in message) {
+                this.retryCount = 0; // <-- stream is up; reset retry budget
+                if (this.retryTimer) {
+                    clearTimeout(this.retryTimer);
+                    this.retryTimer = null;
+                }
                 const capabilities = message.ConnectionComplete.capabilities;
                 const formatRaw = message.ConnectionComplete.format;
                 const width = message.ConnectionComplete.width;
@@ -303,13 +360,21 @@ export class Stream {
         new URLSearchParams(loc.search).forEach((v, k) => { url_params[k] = v; });
         this.sendWsMessage({
             Init: {
+                // host_id: this.hostId,
+                // app_id: this.appId,
+                // video_frame_queue_size: this.settings.videoFrameQueueSize,
+                // audio_sample_queue_size: this.settings.audioSampleQueueSize,
+                // url_origin: loc.origin,      // "http://172.7.191.71:8080" (scheme+host+port, no trailing slash)
+                // url_path: loc.pathname,      // "/stream.html"
+                // url_params,                  // every query param: hostId, appId, + custom
                 host_id: this.hostId,
                 app_id: this.appId,
+                demo_param: this.demoParam, // <-- add this
                 video_frame_queue_size: this.settings.videoFrameQueueSize,
                 audio_sample_queue_size: this.settings.audioSampleQueueSize,
-                url_origin: loc.origin, // "http://172.7.191.71:8080" (scheme+host+port, no trailing slash)
-                url_path: loc.pathname, // "/stream.html"
-                url_params, // every query param: hostId, appId, + custom
+                url_origin: loc.origin,
+                url_path: loc.pathname,
+                url_params,
             }
         });
     }
@@ -334,8 +399,9 @@ export class Stream {
                 });
             }
             yield new Promise((resolve) => window.setTimeout(resolve, FALLBACK_RECONNECT_DELAY_MS));
-            this.ws = this.createControlWebSocket();
-            this.sendInitMessage();
+            // this.ws = this.createControlWebSocket()
+            // this.sendInitMessage()
+            this.reconnect();
         });
     }
     setTransport(transport) {

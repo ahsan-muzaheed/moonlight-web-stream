@@ -161,7 +161,7 @@ export class WebRTCTransport {
         });
     }
     onConnectionStateChange() {
-        var _a, _b;
+        var _a, _b, _c, _d;
         if (!this.peer) {
             (_a = this.logger) === null || _a === void 0 ? void 0 : _a.debug("OnConnectionStateChange without a peer");
             return;
@@ -177,6 +177,14 @@ export class WebRTCTransport {
         else if ((this.peer.connectionState == "failed" || this.peer.connectionState == "closed") && this.peer.iceGatheringState == "complete") {
             type = "fatal";
         }
+        // onConnectionStateChange - make drops visible, not debug-only:
+        const state = this.peer.connectionState;
+        if (state === "failed" || state === "closed") {
+            (_b = this.logger) === null || _b === void 0 ? void 0 : _b.debug(`Peer connection ${state}`, { type: "fatal" }); // "fatal" surfaces it
+        }
+        else {
+            (_c = this.logger) === null || _c === void 0 ? void 0 : _c.debug(`Changing Peer State to ${state}`, { type: type !== null && type !== void 0 ? type : undefined });
+        }
         if (this.peer.connectionState == "failed" || this.peer.connectionState == "closed") {
             if (this.onclose) {
                 if (this.wasConnected) {
@@ -187,7 +195,7 @@ export class WebRTCTransport {
                 }
             }
         }
-        (_b = this.logger) === null || _b === void 0 ? void 0 : _b.debug(`Changing Peer State to ${this.peer.connectionState}`, {
+        (_d = this.logger) === null || _d === void 0 ? void 0 : _d.debug(`Changing Peer State to ${this.peer.connectionState}`, {
             type: type !== null && type !== void 0 ? type : undefined
         });
     }
@@ -200,12 +208,13 @@ export class WebRTCTransport {
         (_b = this.logger) === null || _b === void 0 ? void 0 : _b.debug(`Changing Peer Signaling State to ${this.peer.signalingState}`);
     }
     onIceConnectionStateChange() {
-        var _a, _b;
-        if (!this.peer) {
-            (_a = this.logger) === null || _a === void 0 ? void 0 : _a.debug("OnIceConnectionStateChange without a peer");
+        var _a;
+        if (!this.peer)
             return;
-        }
-        (_b = this.logger) === null || _b === void 0 ? void 0 : _b.debug(`Changing Peer Ice State to ${this.peer.iceConnectionState}`);
+        const s = this.peer.iceConnectionState;
+        (_a = this.logger) === null || _a === void 0 ? void 0 : _a.debug(`Peer ICE state: ${s}`, {
+            type: (s === "failed" || s === "disconnected") ? "fatal" : undefined
+        });
     }
     onIceGatheringStateChange() {
         var _a, _b;
