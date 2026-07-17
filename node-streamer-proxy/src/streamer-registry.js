@@ -23,6 +23,10 @@ class StreamerConnection {
     this.connectedAt = Date.now();
     this.lastSeen = Date.now();
     this.busy = false; // true while a browser session is attached
+    // True once we've told this streamer to Stop/exit. It may still have an
+    // OPEN socket for a moment while it shuts down + relaunches, but it must
+    // NOT be handed to a new viewer during that window.
+    this.draining = false;
     // The currently-attached browser handler. Streamer -> browser messages are
     // routed here. null when idle.
     this.onMessage = null;
@@ -34,7 +38,7 @@ class StreamerConnection {
    * Returns false if the streamer is already busy with another session.
    */
   attach(handler) {
-    if (this.busy) return false;
+    if (this.busy || this.draining) return false;
     this.busy = true;
     this.onMessage = handler;
     return true;
@@ -61,6 +65,11 @@ class StreamerConnection {
 
   isAlive() {
     return this.ws.readyState === 1;
+  }
+
+  // Available = connected, not serving anyone, and not shutting down.
+  isAvailable() {
+    return this.isAlive() && !this.busy && !this.draining;
   }
 }
 
@@ -104,6 +113,7 @@ class StreamerRegistry {
     return Array.from(this.byId.values()).map((c) => ({
       id: c.id,
       busy: c.busy,
+      draining: c.draining,
       connectedAt: c.connectedAt,
       lastSeen: c.lastSeen,
       alive: c.isAlive(),

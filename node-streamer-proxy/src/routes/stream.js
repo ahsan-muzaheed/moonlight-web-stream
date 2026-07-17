@@ -327,8 +327,19 @@ let ownsStream = false;   // <-- ADDED
         const wantId = (init.url_params && init.url_params.streamer) || null;
         const conn = wantId
           ? registry.get(wantId)
-          : registry.list().filter((s) => !s.busy).map((s) => registry.get(s.id))[0];
+          //: registry.list().filter((s) => !s.busy).map((s) => registry.get(s.id))[0];
+          : registry.list().filter((s) => !s.busy && !s.draining && s.alive).map((s) => registry.get(s.id))[0];
 
+
+		 // If a requested-by-id streamer is draining/busy, treat as unavailable.
+        const usable = conn && typeof conn.isAvailable === "function" ? conn.isAvailable() : !!conn;
+        if (conn && !usable) {
+          console.warn("[Stream] requested streamer not available (busy/draining)");
+          sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
+          return ws.close();
+        }
+		
+		
         if (!conn) {
 		  console.warn("[Stream] no connected streamer available");
 		  
@@ -438,7 +449,7 @@ let ownsStream = false;   // <-- ADDED
 
 		  // Capture the connection for the deferred cancel.
 		  const conn = connected ? streamer : null;
-
+			if (conn) conn.draining = true;   // <-- this line
 		  const fire = async () => {
 			pendingCancels.delete(hostKey);
 			try {

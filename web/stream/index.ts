@@ -197,7 +197,7 @@ private reconnect() {
     }
 
 
-		private retryCount = 10
+		private retryCount = 0
 		private retryTimer: ReturnType<typeof setTimeout> | null = null
 		private readonly MAX_RETRIES = 10
 		private readonly RETRY_DELAY_MS = 3000
