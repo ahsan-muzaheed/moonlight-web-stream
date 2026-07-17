@@ -105,7 +105,7 @@ export class Stream implements Component {
     private divElement = document.createElement("div")
     private eventTarget = new EventTarget()
 
-    private ws: WebSocket
+   private ws!: WebSocket
     private iceServers: Array<RTCIceServer> | null = null
     private transportOverride: TransportType | null = null
 
@@ -119,6 +119,12 @@ export class Stream implements Component {
     private hasConnectionComplete = false
     private hasVideoReady = false
     private hasDispatchedVideoReady = false
+
+
+private reconnect() {
+    this.ws = this.createControlWebSocket()
+    this.sendInitMessage()
+}
 
     constructor(api: Api, hostId: number, appId: number, demoParam: string | null, settings: Settings, viewerScreenSize: [number, number], permissions: StreamPermissions) {
         this.logger.addInfoListener((info, type) => {
@@ -136,8 +142,10 @@ export class Stream implements Component {
 
         this.streamerSize = getStreamerSize(settings, viewerScreenSize)
 
-        this.ws = this.createControlWebSocket()
-        this.sendInitMessage()
+        //this.ws = this.createControlWebSocket()
+        //this.sendInitMessage()
+		this.reconnect()
+		
 
         // Stream Input
         const streamInputConfig = defaultStreamInputConfig()
@@ -188,9 +196,40 @@ export class Stream implements Component {
         this.eventTarget.dispatchEvent(event)
     }
 
+
+		private retryCount = 10
+		private retryTimer: ReturnType<typeof setTimeout> | null = null
+		private readonly MAX_RETRIES = 10
+		private readonly RETRY_DELAY_MS = 3000
+
+		private scheduleRetry() {
+			if (this.retryCount >= this.MAX_RETRIES) {
+				this.debugLog("No machine available. Please try again later.", { type: "fatal" })
+				return
+			}
+			this.retryCount++
+			if (this.retryTimer) clearTimeout(this.retryTimer)
+
+			this.retryTimer = setTimeout(() => {
+				this.debugLog(`Retrying… (attempt ${this.retryCount})`, { type: undefined })
+				this.reconnect()   // <-- see note below
+			}, this.RETRY_DELAY_MS)
+		}
+
     private async onMessage(message: StreamServerMessage) {
         if ("DebugLog" in message) {
             const debugLog = message.DebugLog
+			
+			 // NEW: server tells us no streamer/machine is free right now. This is
+			// transient (a streamer relaunches within ~1-2s), so retry instead of
+			// giving up. We key off a marker in ty so we don't string-match the text.
+			//if (debugLog.ty === "Retryable") {
+			if (debugLog.message.includes("No machine available")) {
+				this.debugLog("Waiting for a free machine…", { type: undefined })
+				this.scheduleRetry()
+				return
+			}
+	
 
             this.debugLog(debugLog.message, {
                 type: debugLog.ty ?? undefined
@@ -202,6 +241,10 @@ export class Stream implements Component {
 
             this.eventTarget.dispatchEvent(event)
         } else if ("ConnectionComplete" in message) {
+			
+			this.retryCount = 0            // <-- stream is up; reset retry budget
+			if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null }
+	
             const capabilities = message.ConnectionComplete.capabilities
             const formatRaw = message.ConnectionComplete.format
             const width = message.ConnectionComplete.width
@@ -358,13 +401,25 @@ export class Stream implements Component {
 
     this.sendWsMessage({
         Init: {
-            host_id: this.hostId,
-            app_id: this.appId,
-            video_frame_queue_size: this.settings.videoFrameQueueSize,
-            audio_sample_queue_size: this.settings.audioSampleQueueSize,
-            url_origin: loc.origin,      // "http://172.7.191.71:8080" (scheme+host+port, no trailing slash)
-            url_path: loc.pathname,      // "/stream.html"
-            url_params,                  // every query param: hostId, appId, + custom
+            // host_id: this.hostId,
+            // app_id: this.appId,
+            // video_frame_queue_size: this.settings.videoFrameQueueSize,
+            // audio_sample_queue_size: this.settings.audioSampleQueueSize,
+            // url_origin: loc.origin,      // "http://172.7.191.71:8080" (scheme+host+port, no trailing slash)
+            // url_path: loc.pathname,      // "/stream.html"
+            // url_params,                  // every query param: hostId, appId, + custom
+			
+			
+			host_id: this.hostId,
+        app_id: this.appId,
+        demo_param: this.demoParam,        // <-- add this
+        video_frame_queue_size: this.settings.videoFrameQueueSize,
+        audio_sample_queue_size: this.settings.audioSampleQueueSize,
+        url_origin: loc.origin,
+        url_path: loc.pathname,
+        url_params,
+		
+		
         }
     });
 	}
@@ -393,8 +448,10 @@ export class Stream implements Component {
 
         await new Promise((resolve) => window.setTimeout(resolve, FALLBACK_RECONNECT_DELAY_MS))
 
-        this.ws = this.createControlWebSocket()
-        this.sendInitMessage()
+       // this.ws = this.createControlWebSocket()
+       // this.sendInitMessage()
+		
+		this.reconnect()
     }
 
     private setTransport(transport: Transport) {

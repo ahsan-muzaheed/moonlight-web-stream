@@ -1,5 +1,5 @@
 "use strict";
-
+//curl http://localhost:8080/api/streamer/list
 const { spawn } = require("child_process");
 const readline = require("readline");
 const WebSocket = require("ws");
@@ -330,10 +330,15 @@ function registerStreamRoutes(app, ctx) {
           : registry.list().filter((s) => !s.busy).map((s) => registry.get(s.id))[0];
 
         if (!conn) {
-          console.warn("[Stream] no connected streamer available");
-          sendClientText({ DebugLog: { message: "No streamer available", ty: "FatalDescription" } });
-          return ws.close();
-        }
+		  console.warn("[Stream] no connected streamer available");
+		  sendClientText({
+			DebugLog: {
+			  message: "No machine available right now — retrying shortly…",
+			  ty: "Retryable",   // was "FatalDescription"
+			},
+		  });
+		  return ws.close();
+		}
         if (!conn.attach(handleStreamerMessage)) {
           console.warn(`[Stream] streamer "${conn.id}" is busy`);
           sendClientText({ DebugLog: { message: "Streamer is busy", ty: "FatalDescription" } });
