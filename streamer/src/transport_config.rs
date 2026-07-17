@@ -54,6 +54,14 @@ pub struct TransportConfig {
     /// Shared secret sent in the register handshake. Optional in dev.
     #[serde(default)]
     pub auth_token: Option<String>,
+
+    /// Base directory for path-based app launching. When the browser URL
+    /// supplies owner/appName/version, the streamer builds:
+    ///   {app_directory}/{owner}/{appName}/{version}/{appName}.exe
+    /// and launches that. If unset, or the params are absent, the streamer
+    /// falls back to app-id launching. Example: "z:\\0.apps".
+    #[serde(default)]
+    pub app_directory: Option<String>,
 }
 
 fn default_streamer_id() -> String {
@@ -67,6 +75,7 @@ impl Default for TransportConfig {
             server_url: None,
             streamer_id: default_streamer_id(),
             auth_token: None,
+            app_directory: None,
         }
     }
 }

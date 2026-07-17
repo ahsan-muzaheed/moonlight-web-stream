@@ -6,3 +6,8 @@ auth_token  = "secret123"
 
 # OLD mode (or just delete this file entirely):
 # transport = "stdio"
+# NEW: base dir for path-based launching.
+# When the browser URL has owner/appName/version, the streamer builds:
+#   {app_directory}\{owner}\{appName}\{version}\{appName}.exe
+# and launches that. Absent params -> falls back to app-id launching.
+app_directory = "z:\\0.apps"
