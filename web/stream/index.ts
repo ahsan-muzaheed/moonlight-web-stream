@@ -122,6 +122,10 @@ export class Stream implements Component {
 
 
 private reconnect() {
+    // Cancel any pending retry/countdown — we're attempting now.
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null }
+    if (this.retryTick) { clearInterval(this.retryTick); this.retryTick = null }
+
     this.ws = this.createControlWebSocket()
     this.sendInitMessage()
 }
@@ -199,6 +203,7 @@ private reconnect() {
 
 		private retryCount = 0
 		private retryTimer: ReturnType<typeof setTimeout> | null = null
+		private retryTick: ReturnType<typeof setInterval> | null = null   // <-- ADD THIS
 		private readonly MAX_RETRIES = 10
 		private readonly RETRY_DELAY_MS = 3000
 
@@ -235,6 +240,14 @@ private reconnect() {
                 type: debugLog.ty ?? undefined
             })
         } else if ("UpdateApp" in message) {
+			
+			// We got attached to a streamer (a slot opened) — stop all retrying so a
+			// pending retry timer can't fire and abort this stream we're now starting.
+			this.retryCount = 0
+			if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null }
+			if (this.retryTick) { clearInterval(this.retryTick); this.retryTick = null }
+
+
             const event: InfoEvent = new CustomEvent("stream-info", {
                 detail: { type: "app", app: message.UpdateApp.app }
             })

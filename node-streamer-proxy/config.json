@@ -19,7 +19,7 @@
     "path": "../target/release/streamer.exe",                 
     "log_level": "Debug",
  "cancel_app_on_disconnect": true,
-  "cancel_grace_secs": 1	,
+  "cancel_grace_secs": 0	,
   "use_connected": true
   },                                                          
   "webrtc": {                                                 
