@@ -54,6 +54,7 @@ url_params: std::collections::HashMap<String, String>, // hostId, appId, + custo
     WebSocket(StreamClientMessage),
     WebSocketTransport(Bytes),
     Stop,
+	Cancel,   // ADD: ask the streamer to tell Sunshine to quit the app
 }
 
 #[derive(Debug, Serialize, Deserialize)]

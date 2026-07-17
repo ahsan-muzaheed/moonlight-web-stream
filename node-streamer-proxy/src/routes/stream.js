@@ -369,7 +369,7 @@ let ownsStream = false;   // <-- ADDED
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close111", () => {
 		
 		if (!ownsStream) return;   // ADD: a rejected viewer never owned the stream, so bail
 
@@ -414,6 +414,79 @@ let ownsStream = false;   // <-- ADDED
         fire();
       }
     });
+	
+	
+	ws.on("close", () => {
+	if (!ownsStream) return;   // rejected viewer never owned the stream
+
+		  const connected = streamer && useConnectedStreamer && typeof streamer.detach === "function";
+		  const spawned   = streamer && !useConnectedStreamer;
+
+		  // Spawned path unchanged: stop() kills the child.
+		  if (spawned && typeof streamer.stop === "function") {
+			streamer.stop();
+		  }
+
+		  if (!cancelOnDisconnect || !activeHost) {
+			// No cancel wanted: still stop/detach a connected streamer.
+			if (connected) { streamer.send("Stop"); streamer.detach(); }
+			return;
+		  }
+
+		  const hostKey = String(activeHost.id);
+		  if (pendingCancels.has(hostKey)) return; // already scheduled
+
+		  // Capture the connection for the deferred cancel.
+		  const conn = connected ? streamer : null;
+
+		  const fire = async () => {
+			pendingCancels.delete(hostKey);
+			try {
+			  if (conn) {
+				// NEW: route cancel THROUGH the streamer (co-located with Sunshine).
+				// Order matters: Cancel first (Sunshine quits the app), then Stop
+				// (streamer tears down). Works same-box or remote.
+				conn.send("Cancel");
+				conn.send("Stop");
+				conn.detach();
+				console.log(`[Stream] cancel routed via streamer for host ${hostKey}`);
+			  } else {
+				// Spawned path: Node calls Sunshine directly (same box only).
+				const host = ctx.storage.getHost(activeHost.id);
+				if (!host) return;
+				await moonlight.cancelApp(host, user.hostUniqueId);
+				console.log(`[Stream] app cancelled on host ${hostKey}, machine freed`);
+			  }
+			} catch (err) {
+			  console.warn(`[Stream] cancel failed on host ${hostKey}:`, err.message);
+			}
+		  };
+
+		  if (graceSecs > 0) {
+			console.log(`[Stream] client gone; cancelling app on host ${hostKey} in ${graceSecs}s unless it reconnects`);
+			pendingCancels.set(hostKey, setTimeout(fire, graceSecs * 1000));
+		  } else {
+			fire();
+		  }
+		});
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
   });
 }
 

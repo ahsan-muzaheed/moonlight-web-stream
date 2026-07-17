@@ -727,6 +727,15 @@ impl StreamConnection {
             ServerIpcMessage::Stop => {
                 self.stop().await;
             }
+			
+			ServerIpcMessage::Cancel => {
+                info!("[Stream] Cancel requested -> asking Sunshine to quit the app");
+                match self.info.host.cancel().await {
+                    Ok(true)  => info!("[Stream] Sunshine cancelled the app"),
+                    Ok(false) => warn!("[Stream] Sunshine reported nothing to cancel"),
+                    Err(err)  => warn!("[Stream] cancel failed: {err}"),
+                }
+            }
             _ => {}
         }
 
