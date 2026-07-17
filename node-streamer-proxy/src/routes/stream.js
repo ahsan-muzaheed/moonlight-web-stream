@@ -237,7 +237,7 @@ function registerStreamRoutes(app, ctx) {
 
     let streamer = null;
     let activeHost = null; // captured at Init, needed by the close handler
-
+let ownsStream = false;   // <-- ADDED
     const sendClientText = (inner) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(inner));
     };
@@ -331,12 +331,20 @@ function registerStreamRoutes(app, ctx) {
 
         if (!conn) {
 		  console.warn("[Stream] no connected streamer available");
-		  sendClientText({
+		  
+		  /* sendClientText({
 			DebugLog: {
 			  message: "No machine available right now — retrying shortly…",
 			  ty: "Retryable",   // was "FatalDescription"
 			},
-		  });
+		  }); */
+		  
+		  // both reject branches (no streamer / busy), changed from:
+//   { message: "No streamer available", ty: "FatalDescription" }
+//   { message: "Streamer is busy",      ty: "FatalDescription" }
+// to:
+		sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
+
 		  return ws.close();
 		}
         if (!conn.attach(handleStreamerMessage)) {
@@ -346,6 +354,7 @@ function registerStreamRoutes(app, ctx) {
         }
 
         streamer = conn; // has .send(); detached (not stopped) on close
+		ownsStream = true;   // <-- ADDED
         console.log(`[Stream] attached to connected streamer "${conn.id}"`);
         streamer.send({ Init: built.payload });
       } else {
@@ -355,11 +364,16 @@ function registerStreamRoutes(app, ctx) {
         streamer.onExit = () => {
           if (ws.readyState === WebSocket.OPEN) ws.close();
         };
+		ownsStream = true;   // <-- ADDED
         streamer.send({ Init: built.payload });
       }
     });
 
     ws.on("close", () => {
+		
+		if (!ownsStream) return;   // ADD: a rejected viewer never owned the stream, so bail
+
+
       if (streamer) {
         if (useConnectedStreamer && typeof streamer.detach === "function") {
           // Tell the daemon to stop the current stream, then detach it so it
