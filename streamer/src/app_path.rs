@@ -61,7 +61,8 @@ pub fn resolve_app_exe(
     // All three params must be present to attempt path mode. Case-sensitive keys
     // matching what the browser sends: owner, appName, version.
     let owner = url_params.get("owner");
-    let app_name = url_params.get("appName");
+    //let app_name = url_params.get("appName");
+	 let app_name = url_params.get("app");
     let version = url_params.get("version");
 
     let (owner, app_name, version) = match (owner, app_name, version) {
@@ -86,7 +87,7 @@ pub fn resolve_app_exe(
     };
 
     let owner = sanitize_segment("owner", owner)?;
-    let app_name = sanitize_segment("appName", app_name)?;
+    let app_name = sanitize_segment("app", app_name)?;
     let version = sanitize_segment("version", version)?;
 
     // exe name assumed == appName + ".exe"
@@ -171,7 +172,8 @@ mod tests {
             m.insert("owner".into(), o.into());
         }
         if !a.is_empty() {
-            m.insert("appName".into(), a.into());
+            //m.insert("appName".into(), a.into());
+			m.insert("app".into(), a.into());     // was "appName"
         }
         if !v.is_empty() {
             m.insert("version".into(), v.into());

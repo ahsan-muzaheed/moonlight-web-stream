@@ -112,6 +112,9 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
 // Prefer an app NAME if the URL supplied one - ids are CRC32(name+image), so
 // they change if an app is renamed, silently breaking saved links. Names are stable.
 const wantedName = urlParams && urlParams.appName;
+const isPathMode = urlParams && urlParams.app;   // presence of `app` = exe-path launch
+
+
 
 /* let app;
 if (wantedName) {
@@ -127,7 +130,13 @@ if (wantedName) {
 // so renaming an app changes its id and breaks saved links. Names are stable.
 let app = null;
 
-if (wantedName) 
+if (isPathMode) {
+  // Path-based launch: the streamer builds the exe path from owner/app/version.
+  // There is nothing to resolve against Sunshine's applist, and app_id is unused
+  // because Sunshine prioritises web_exe_path.
+  app = { app_id: 0, title: urlParams.app };
+  console.log(`[Init] path-mode launch: ${urlParams.owner}/${urlParams.app}/${urlParams.version}`);
+} else if (wantedName) 
 {
   // Look up by name
   console.log("[Init] apps.length:", apps.length);

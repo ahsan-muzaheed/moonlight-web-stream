@@ -39,15 +39,18 @@ async function startApp() {
     const hostIdStr = queryParams.get("hostId")
     const appIdStr = queryParams.get("appId")
 	const appNameStr = queryParams.get("appName");
+	const appStr = queryParams.get("app")  
 	
     //if (hostIdStr == null || appIdStr == null) 
-	if (!hostIdStr || (!appIdStr && !appNameStr))
-	{
-        await showMessage(I.stream.missingHostOrApp)
+	
+	          // ADD
 
-        window.close()
-        return
-    }
+	if (!hostIdStr || (!appIdStr && !appNameStr && !appStr)) {
+		await showMessage(I.stream.missingHostOrApp)
+		window.close()
+		return
+	}
+
     const hostId = Number.parseInt(hostIdStr)
     //const appId = Number.parseInt(appIdStr)
 	const appId = appIdStr ? Number.parseInt(appIdStr) : 0

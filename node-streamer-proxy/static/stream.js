@@ -43,8 +43,10 @@ function startApp() {
         const hostIdStr = queryParams.get("hostId");
         const appIdStr = queryParams.get("appId");
         const appNameStr = queryParams.get("appName");
+        const appStr = queryParams.get("app");
         //if (hostIdStr == null || appIdStr == null) 
-        if (!hostIdStr || (!appIdStr && !appNameStr)) {
+        // ADD
+        if (!hostIdStr || (!appIdStr && !appNameStr && !appStr)) {
             yield showMessage(I.stream.missingHostOrApp);
             window.close();
             return;
