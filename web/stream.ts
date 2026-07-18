@@ -35,21 +35,47 @@ async function startApp() {
         return;
     }
 
-    // Get Host and App via Query
-    const hostIdStr = queryParams.get("hostId")
-    const appIdStr = queryParams.get("appId")
-	const appNameStr = queryParams.get("appName");
-	const appStr = queryParams.get("app")  
-	
-    //if (hostIdStr == null || appIdStr == null) 
-	
-	          // ADD
+// Compute the path segments first — needed to detect a pretty URL.
+const seg = window.location.pathname.split("/").filter(Boolean)
+const isPrettyUrl = seg[0] === "v5" && seg.length >= 4
 
-	if (!hostIdStr || (!appIdStr && !appNameStr && !appStr)) {
-		await showMessage(I.stream.missingHostOrApp)
-		window.close()
-		return
-	}
+// Get Host and App via Query
+let hostIdStr = queryParams.get("hostId")
+if (hostIdStr === null && isPrettyUrl) {
+    hostIdStr = "1"
+}
+
+const appIdStr = queryParams.get("appId")
+const appNameStr = queryParams.get("appName")
+
+let appStr = queryParams.get("app")
+let ownerStr = queryParams.get("owner")
+let versionStr = queryParams.get("version")
+let configNameStr: string | null = null   // reserved, unused for now
+
+// Pretty URL support: /v5/{owner}/{app}/{configName}?appVersion=N
+if (isPrettyUrl) {
+    if (ownerStr === null) ownerStr = seg[1]
+    if (appStr === null) appStr = seg[2]
+    configNameStr = seg[3]
+
+    // Version comes from ?appVersion=, defaulting to "1" when omitted.
+    if (versionStr === null) {
+        const appVersion = queryParams.get("appVersion")
+        if (appVersion !== null && appVersion !== "") {
+            versionStr = appVersion
+        } else {
+            versionStr = "1"
+        }
+    }
+}
+
+if (!hostIdStr || (!appIdStr && !appNameStr && !appStr)) {
+    await showMessage(I.stream.missingHostOrApp)
+    window.close()
+    return
+}
+
 
     const hostId = Number.parseInt(hostIdStr)
     //const appId = Number.parseInt(appIdStr)

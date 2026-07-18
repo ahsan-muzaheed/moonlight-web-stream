@@ -358,6 +358,19 @@ export class Stream {
         const loc = window.location;
         const url_params = {};
         new URLSearchParams(loc.search).forEach((v, k) => { url_params[k] = v; });
+        // Pretty URL: /v5/{owner}/{app}/{configName}?appVersion=N
+        const seg = loc.pathname.split("/").filter(Boolean);
+        if (seg[0] === "v5" && seg.length >= 4) {
+            if (url_params.owner === undefined)
+                url_params.owner = seg[1];
+            if (url_params.app === undefined)
+                url_params.app = seg[2];
+            if (url_params.configName === undefined)
+                url_params.configName = seg[3];
+            if (url_params.version === undefined) {
+                url_params.version = url_params.appVersion || "1";
+            }
+        }
         this.sendWsMessage({
             Init: {
                 // host_id: this.hostId,
