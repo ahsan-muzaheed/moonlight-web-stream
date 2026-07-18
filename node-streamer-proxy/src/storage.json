@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "users": {},
+  "roles": {
+    "1": {
+      "id": 1,
+      "name": "Admin",
+      "ty": "Admin",
+      "defaultSettings": {},
+      "permissions": {
+        "allow_add_hosts": true,
+        "maximum_bitrate_kbps": null,
+        "allow_codec_h264": true,
+        "allow_codec_h265": true,
+        "allow_codec_av1": true,
+        "allow_hdr": true,
+        "allow_transport_webrtc": true,
+        "allow_transport_websockets": true
+      }
+    },
+    "2": {
+      "id": 2,
+      "name": "User",
+      "ty": "User",
+      "defaultSettings": {},
+      "permissions": {
+        "allow_add_hosts": true,
+        "maximum_bitrate_kbps": null,
+        "allow_codec_h264": true,
+        "allow_codec_h265": true,
+        "allow_codec_av1": true,
+        "allow_hdr": true,
+        "allow_transport_webrtc": true,
+        "allow_transport_websockets": true
+      }
+    }
+  },
+  "hosts": {},
+  "sessions": {},
+  "nextIds": {
+    "user": 1,
+    "role": 3,
+    "host": 1
+  }
+}
