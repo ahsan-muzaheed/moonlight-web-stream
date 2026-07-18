@@ -30,3 +30,4 @@ web-server.exe
 /target/release/build
 /target/release/deps
 *.pdb
+node-streamer-proxy/package-lock.json
