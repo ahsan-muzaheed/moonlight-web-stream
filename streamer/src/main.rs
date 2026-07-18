@@ -845,20 +845,97 @@ impl StreamConnection {
         let aes_key = AesKey::new_random(&OpenSSLCryptoBackend)?;
         let aes_iv = AesIv::new_random(&OpenSSLCryptoBackend)?;
 
-        /* let stream_config = match host
+        // ---- 1) Decide the launch target BEFORE building the query -------------
+        // Path-based if owner/app/version are present in the browser URL, else
+        // fall back to app-id launching. This MUST happen before the query is
+        // assembled, otherwise web_exe_path never makes it into the request.
+        let exe_path_param: Option<String> = match app_path::resolve_app_exe(
+            self.info.app_directory.as_deref(),
+            &self.info.url_params,
+        ) {
+            Ok(Some(exe_path)) => {
+                info!("[Stream] path-based launch: {}", exe_path.display());
+                Some(exe_path.display().to_string())
+            }
+            Ok(None) => {
+                info!("[Stream] app-id launch (no owner/app/version params)");
+                None
+            }
+            Err(err) => {
+                // Params were supplied but invalid / exe missing -> abort and tell
+                // the browser (async over the WS, via the normal DebugLog path).
+                let msg = format!("Cannot launch app: {err}");
+                warn!("[Stream] {msg}");
+                ipc_sender
+                    .send(StreamerIpcMessage::WebSocket(
+                        StreamServerMessage::DebugLog {
+                            message: msg.clone(),
+                            ty: Some(LogMessageType::FatalDescription),
+                        },
+                    ))
+                    .await;
+                return Err(anyhow::anyhow!(msg));
+            }
+        };
+
+        // ---- 2) Merge moonlight's launch params with our URL passthrough --------
+        // moonlight generates its own (rikey, rikeyid, mode, sops, gcmap, ...).
+        // We append the browser's URL components so Sunshine can rebuild the full
+        // URL and expose it to the launched app as environment variables, plus
+        // web_exe_path when this is a path-based launch.
+        let base = self.moonlight.launch_query_parameters();
+
+        let mut extra: Vec<String> = Vec::new();
+        // Prefix everything so Sunshine can identify our params without needing a
+        // hardcoded list of GameStream keys, and so a browser param can never
+        // collide with moonlight's own (mode, rikey, appid, ...).
+        extra.push(format!(
+            "web_url_origin={}",
+            form_urlencoded::byte_serialize(self.info.url_origin.as_bytes()).collect::<String>()
+        ));
+        extra.push(format!(
+            "web_url_path={}",
+            form_urlencoded::byte_serialize(self.info.url_path.as_bytes()).collect::<String>()
+        ));
+        for (k, v) in &self.info.url_params {
+            extra.push(format!(
+                "web_p_{}={}",
+                form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
+                form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>()
+            ));
+        }
+        // Path-based launch: tell Sunshine exactly which exe to run.
+        if let Some(p) = &exe_path_param {
+            extra.push(format!(
+                "web_exe_path={}",
+                form_urlencoded::byte_serialize(p.as_bytes()).collect::<String>()
+            ));
+        }
+        let extra = extra.join("&");
+
+        let launch_query = if base.is_empty() {
+            extra
+        } else if extra.is_empty() {
+            base.to_string()
+        } else {
+            format!("{base}&{extra}")
+        };
+
+        info!("[Stream] launch query -> Sunshine: {launch_query}");
+
+        let stream_config = match host
             .start_stream(
                 self.info.app_id,
                 &settings,
                 aes_key,
                 aes_iv,
-                self.moonlight.launch_query_parameters(),
+                &launch_query,
             )
             .await
         {
             Ok(value) => value,
             Err(err) => {
                 warn!("[Stream]: failed to start moonlight stream: {err}");
-
                 #[allow(clippy::single_match)]
                 match err {
                     MoonlightClientError::Moonlight(MoonlightError::ConnectionAlreadyExists) => {
@@ -870,122 +947,9 @@ impl StreamConnection {
                     }
                     _ => {}
                 }
-
                 return Err(err.into());
             }
         };
- */
- 
- 
-
-	// ---- Merge moonlight's launch params with our URL passthrough ------------
-	// moonlight generates its own (rikey, rikeyid, mode, sops, gcmap, ...).
-	// We append the browser's URL components so Sunshine can rebuild the full URL
-	// and expose it to the launched app as environment variables.
-	let base = self.moonlight.launch_query_parameters();
-
-	let mut extra: Vec<String> = Vec::new();
-	// Prefix everything so Sunshine can identify our params without needing a
-		// hardcoded list of GameStream keys, and so a browser param can never
-		// collide with moonlight's own (mode, rikey, appid, ...).
-		extra.push(format!(
-			"web_url_origin={}",
-			form_urlencoded::byte_serialize(self.info.url_origin.as_bytes()).collect::<String>()
-		));
-		extra.push(format!(
-			"web_url_path={}",
-			form_urlencoded::byte_serialize(self.info.url_path.as_bytes()).collect::<String>()
-		));
-		for (k, v) in &self.info.url_params {
-			extra.push(format!(
-				"web_p_{}={}",
-				form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
-				form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>()
-			));
-		}
-	let extra = extra.join("&");
-
-	let launch_query = if base.is_empty() {
-		extra
-	} else if extra.is_empty() {
-		base.to_string()
-	} else {
-		format!("{base}&{extra}")
-	};
-
-	info!("[Stream] launch query -> Sunshine: {launch_query}");   // so you can see it
-		// Decide launch target: path-based if owner/appName/version present, else app-id.
-		match app_path::resolve_app_exe(
-			self.info.app_directory.as_deref(),
-			&self.info.url_params,
-		) {
-			Ok(Some(exe_path)) => {
-				info!("[Stream] path-based launch: {}", exe_path.display());
-				// when ready: append to launch_query so Sunshine receives it
-				// e.g. push web_exe_path=<urlencoded exe_path> into `extra` BEFORE building launch_query
-			}
-			Ok(None) => {
-				info!("[Stream] app-id launch (no owner/appName/version params)");
-				// existing behaviour, unchanged
-			}
-			Err(err) => {
-				// Params were supplied but invalid/missing exe -> abort + tell browser.
-				let msg = format!("Cannot launch app: {err}");
-				warn!("[Stream] {msg}");
-				//aself.send_debug_fatal(&msg).await;   // sends DebugLog fatal up to Node->browser
-				
-				 ipc_sender
-				.send(StreamerIpcMessage::WebSocket(
-					StreamServerMessage::DebugLog {
-						message: msg.clone(),
-						ty: Some(LogMessageType::FatalDescription),
-					},
-				))
-				.await; 
-				
-				// Async over the WS, anytime — reuse the existing DebugLog path:
-			/* ipc_sender
-					.lock()
-					.await
-					.send(StreamerIpcMessage::WebSocket(
-						StreamServerMessage::DebugLog {
-							message: msg.clone(),
-							ty: Some(LogMessageType::FatalDescription),
-						},
-					))
-					.await;*/
-				
-				return Err(anyhow::anyhow!(msg));
-			}	
-		}
-
-	let stream_config = match host
-		.start_stream(
-			self.info.app_id,
-			&settings,
-			aes_key,
-			aes_iv,
-			&launch_query,          // <-- was self.moonlight.launch_query_parameters()
-		)
-		.await
-	{
-		Ok(value) => value,
-		Err(err) => {
-			warn!("[Stream]: failed to start moonlight stream: {err}");
-			#[allow(clippy::single_match)]
-			match err {
-				MoonlightClientError::Moonlight(MoonlightError::ConnectionAlreadyExists) => {
-					ipc_sender
-						.send(StreamerIpcMessage::WebSocket(
-							StreamServerMessage::DebugLog { message: "Failed to start stream because this streamer is already streaming".to_string(), ty: None },
-						))
-						.await;
-				}
-				_ => {}
-			}
-			return Err(err.into());
-		}
-	};
 
         let settings_clone = settings.clone();
         let moonlight_instance = self.moonlight.clone();
