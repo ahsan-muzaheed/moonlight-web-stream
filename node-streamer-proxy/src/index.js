@@ -50,11 +50,14 @@ function main() {
   const staticDir = path.resolve(config.web_server.static_dir);
   
   
-  //app.use(express.static(staticDir));
-  //app.get("*", (_req, res) => res.sendFile(path.join(staticDir, "index.html")));
   
-  
-  
+     // Pretty launch URLs: /v5/{owner}/{app}/{configName}
+    // Serves stream.html directly (no redirect) - the frontend reads the
+    // owner/app/configName from the PATH when query params are absent.//app.use(express.static(staticDir));
+    app.get("/v5/:owner/:app/:configName", (req, res) => {//app.get("*", (_req, res) => res.sendFile(path.join(staticDir, "index.html")));
+      res.sendFile(path.join(staticDir, "stream2.html"));
+    });
+    
   
   // Collapse any accidental double slashes before routing
 app.use((req, _res, next) => {
