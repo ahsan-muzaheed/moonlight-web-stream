@@ -93,7 +93,12 @@ function registerStreamerEndpoint(app, ctx, registry) {
       // an IPC message ({WebSocket:...}/{WebSocketTransport:...}/"Stop") destined
       // for the currently-attached browser session.
       if (msg && typeof msg.type === "string") {
-        if (msg.type === "ping") safeSend(ws, { type: "pong" });
+        if (msg.type === "ping") {
+          safeSend(ws, { type: "pong" });
+        } else if (msg.type === "response") {
+          // Reply to a Node -> streamer request (e.g. GetAppList).
+          registered.handleResponse(msg);
+        }
         // "pong" and unknown control types: ignore.
         return;
       }
@@ -104,7 +109,10 @@ function registerStreamerEndpoint(app, ctx, registry) {
 
     ws.on("close", () => {
       clearTimeout(registerTimer);
-      if (registered) registry.remove(registered.id, ws);
+      if (registered) {
+        registered.failAllPending("streamer disconnected");
+        registry.remove(registered.id, ws);
+      }
       console.log(`[StreamerGW] connection from ${peer} closed`);
     });
 
