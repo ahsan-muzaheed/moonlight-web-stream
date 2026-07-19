@@ -85,104 +85,104 @@ function sanitizeUrlParams(params) {
 }
 
 /**
+ * Fetch the host's app list.
+ *
+ * Preferred path: ask the CONNECTED streamer. It sits on the same machine as
+ * Sunshine, so it can reach it on localhost - this is what makes a REMOTE Node
+ * server work, since Node itself may have no route to Sunshine at all.
+ * Address comes from the streamer's own streamer.toml; the pairing certs are
+ * sent along with the request, because Node is what did the pairing.
+ *
+ * Fallback: call Sunshine directly (old spawn architecture, or Node and
+ * Sunshine on the same box).
+ */
+async function fetchAppList(host, user, streamerConn) {
+  if (streamerConn && typeof streamerConn.request === "function") {
+    try {
+      const apps = await streamerConn.request("GetAppList", {
+        client_unique_id: user.hostUniqueId,
+        client_private_key: toPkcs8(host.pairInfo.clientPrivateKey),
+        client_certificate: host.pairInfo.clientCertificate,
+        server_certificate: host.pairInfo.serverCertificate,
+      });
+      if (Array.isArray(apps)) {
+        console.log(`[Init] applist via streamer: ${apps.length} apps`);
+        return apps;
+      }
+      console.warn("[Init] streamer returned a bad app list, falling back");
+    } catch (err) {
+      console.warn(`[Init] applist via streamer failed (${err.message}), falling back to direct call`);
+    }
+  }
+  return moonlight.listApps(host, user.hostUniqueId);
+}
+
+/**
  * Build the streamer's Init payload from stored host + pairing data.
  * This is the piece the earlier stand-alone relay left as a stub.
  */
-async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize, audioSampleQueueSize, urlOrigin, urlPath, urlParams }) {
-	
-	console.log("[Init] urlParams:", JSON.stringify(urlParams), "appId:", appId);
-	
-  const { storage, config } = ctx;
 
+async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize, audioSampleQueueSize, urlOrigin, urlPath, urlParams }, streamerConn) {
+ 
+  console.log("[Init] urlParams:", JSON.stringify(urlParams), "appId:", appId);
+ 
+  const { storage, config } = ctx;
+ 
   const host = storage.getHostForUser(user, hostId); // throws HostNotFound/Forbidden
   if (!host.pairInfo) throw new Error("HostNotPaired");
-
-  // Resolve which app to launch, against the host's live app list.
-  //
-  // Prefer ?appName= when present. Sunshine derives app ids as
-  // CRC32(name + box-art), so renaming an app (or changing its image) CHANGES
-  // its id and silently breaks every saved URL. A name is stable, so links
-  // built with ?appName= keep working. ?appId= still works for old links.
-  const apps = await moonlight.listApps(host, user.hostUniqueId);
-  
-  
-//const app = apps.find((a) => a.app_id === Number(appId));
-  //if (!app) throw new Error("AppNotFound");
-  
-// Prefer an app NAME if the URL supplied one - ids are CRC32(name+image), so
-// they change if an app is renamed, silently breaking saved links. Names are stable.
-const wantedName = urlParams && urlParams.appName;
-const isPathMode = urlParams && urlParams.app;   // presence of `app` = exe-path launch
-
-
-
-/* let app;
-if (wantedName) {
-  app = apps.find((a) => a.title === wantedName);
-  if (!app) throw new Error(`ss-> AppNotFound: no app named "${wantedName}"`);
-} else {
-  app = apps.find((a) => a.app_id === Number(appId));
-  if (!app) throw new Error("AppNotFound");
-} */
-
-// Find the app to launch.
-// Prefer ?appName= when present: Sunshine derives app ids as CRC32(name + image),
-// so renaming an app changes its id and breaks saved links. Names are stable.
-let app = null;
-
-if (isPathMode) {
-  // Path-based launch: the streamer builds the exe path from owner/app/version.
-  // There is nothing to resolve against Sunshine's applist, and app_id is unused
-  // because Sunshine prioritises web_exe_path.
-  app = { app_id: 0, title: urlParams.app };
-  console.log(`[Init] path-mode launch: ${urlParams.owner}/${urlParams.app}/${urlParams.version}`);
-} else if (wantedName) 
-{
-  // Look up by name
-  console.log("[Init] apps.length:", apps.length);
-  console.log("[Init] wantedName:",wantedName);
-  
-  for (let i = 0; i < apps.length; i++) {
-	  
-	   console.log("[Init] apps[i].title:", apps[i].title);
-	   
-    if (apps[i].title === wantedName) {
-      app = apps[i];
-      break;
+ 
+  // Prefer an app NAME if the URL supplied one - ids are CRC32(name+image), so
+  // they change if an app is renamed, silently breaking saved links.
+  const wantedName = urlParams && urlParams.appName;
+  const isPathMode = urlParams && urlParams.app; // presence of `app` = exe-path launch
+ 
+  let app = null;
+ 
+  if (isPathMode) {
+    // Path-based launch: the streamer builds the exe path from owner/app/version.
+    // Nothing to resolve against Sunshine's applist, and app_id is unused because
+    // Sunshine prioritises web_exe_path. Note we never fetch the applist here.
+    app = { app_id: 0, title: urlParams.app };
+    console.log(`[Init] path-mode launch: ${urlParams.owner}/${urlParams.app}/${urlParams.version}`);
+  } else {
+    // Both remaining modes resolve against the host's live app list, so fetch it
+    // now (and only now).
+    const apps = await fetchAppList(host, user, streamerConn);
+ 
+    if (wantedName) {
+      console.log("[Init] apps.length:", apps.length);
+      console.log("[Init] wantedName:", wantedName);
+ 
+      for (let i = 0; i < apps.length; i++) {
+        console.log("[Init] apps[i].title:", apps[i].title);
+        if (apps[i].title === wantedName) {
+          app = apps[i];
+          break;
+        }
+      }
+      if (app === null) {
+        throw new Error(`AppNotFound: no app named "${wantedName}"`);
+      }
+    } else {
+      const wantedId = Number(appId);
+      console.log("[Init] wantedId:", wantedId);
+ 
+      for (let i = 0; i < apps.length; i++) {
+        console.log("[Init] apps[i].app_id:", apps[i].app_id);
+        if (apps[i].app_id === wantedId) {
+          app = apps[i];
+          break;
+        }
+      }
+      if (app === null) {
+        throw new Error(`AppNotFound: no app with id ${appId}`);
+      }
     }
   }
-  if (app === null) {
-    throw new Error(`AppNotFound: no app named "${wantedName}"`);
-  }
-} else {
-  // Look up by numeric id
-  const wantedId = Number(appId);
-    console.log("[Init] wantedId:",wantedId);
-  for (let i = 0; i < apps.length; i++) {
-	  
-	   console.log("[Init] apps[i].app_id:", apps[i].app_id);
-	   
-	   
-    if (apps[i].app_id === wantedId) {
-      app = apps[i];
-      break;
-    }
-  }
-  if (app === null) {
-    throw new Error(`AppNotFound: no app with id ${appId}`);
-  }
-}
-
-// use the resolved id everywhere downstream
-const resolvedAppId = app.app_id;
-
-  
-  
-  
-
+ 
   const role = storage.getRole(user.roleId);
   const permissions = role ? role.permissions : {};
-
+ 
   // Field names/shapes here must match Rust ServerIpcMessage::Init exactly.
   return {
     payload: {
@@ -196,7 +196,9 @@ const resolvedAppId = app.app_id;
       client_private_key: toPkcs8(host.pairInfo.clientPrivateKey),
       client_certificate: host.pairInfo.clientCertificate,
       server_certificate: host.pairInfo.serverCertificate,
-      app_id: app.app_id,//Number(appId),
+      // The id resolved above - NOT the raw ?appId= from the URL. When the
+      // caller used ?appName=, this is the id we looked up for that name.
+      app_id: app.app_id,
       video_frame_queue_size: videoFrameQueueSize ?? 8,
       audio_sample_queue_size: audioSampleQueueSize ?? 8,
       permissions,
@@ -216,7 +218,6 @@ const resolvedAppId = app.app_id;
     app,
   };
 }
-
 // Cancels scheduled but not yet fired, keyed by host id. Lets a quick reconnect
 // abort the pending teardown instead of losing the session to a network blip.
 const pendingCancels = new Map();
@@ -246,7 +247,14 @@ function registerStreamRoutes(app, ctx) {
 
     let streamer = null;
     let activeHost = null; // captured at Init, needed by the close handler
-let ownsStream = false;   // <-- ADDED
+    // True only once THIS ws actually owns the stream (spawned a streamer or
+    // successfully attached a connected one). A rejected 2nd viewer must NOT
+    // run the cancel/teardown path - that would kill the 1st viewer's stream.
+    let ownsStream = false;
+    // Streamer chosen for this session. Picked before Init is built because it
+    // is also our route to Sunshine for the app list.
+    let pickedConn = null;
+
     const sendClientText = (inner) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(inner));
     };
@@ -283,6 +291,18 @@ let ownsStream = false;   // <-- ADDED
 
       let built;
       try {
+        // In connected mode, choose the streamer FIRST: it is our route to
+        // Sunshine (app list lookup), and we need it before building Init.
+        if (useConnectedStreamer) {
+          const wantId = (init.url_params && init.url_params.streamer) || null;
+          pickedConn = wantId
+            ? registry.get(wantId)
+            : registry
+                .list()
+                .filter((st) => !st.busy && !st.draining && st.alive)
+                .map((st) => registry.get(st.id))[0];
+        }
+
         built = await buildInitPayload(ctx, user, {
           hostId: init.host_id,
           appId: init.app_id,
@@ -292,7 +312,7 @@ let ownsStream = false;   // <-- ADDED
           urlOrigin: init.url_origin,
           urlPath: init.url_path,
           urlParams: init.url_params,
-        });
+        }, pickedConn);
       } catch (err) {
         console.warn("[Stream] failed to start:", err.message);
         sendClientText({ DebugLog: { message: `Failed to start stream: ${err.message}`, ty: "FatalDescription" } });
@@ -333,12 +353,7 @@ let ownsStream = false;   // <-- ADDED
         // ---- NEW: attach to a streamer that dialed in --------------------
         // For now, single streamer: use the requested id if given, else the
         // first connected one. (Multi-streamer picking is a later step.)
-        const wantId = (init.url_params && init.url_params.streamer) || null;
-        const conn = wantId
-          ? registry.get(wantId)
-          //: registry.list().filter((s) => !s.busy).map((s) => registry.get(s.id))[0];
-          : registry.list().filter((s) => !s.busy && !s.draining && s.alive).map((s) => registry.get(s.id))[0];
-
+        const conn = pickedConn;
 
 		 // If a requested-by-id streamer is draining/busy, treat as unavailable.
         const usable = conn && typeof conn.isAvailable === "function" ? conn.isAvailable() : !!conn;
@@ -347,11 +362,11 @@ let ownsStream = false;   // <-- ADDED
           sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
           return ws.close();
         }
-		
-		
+
         if (!conn) {
-		  console.warn("[Stream] no connected streamer available");
-		  
+          console.warn("[Stream] no connected streamer available");
+          sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
+	  
 		  /* sendClientText({
 			DebugLog: {
 			  message: "No machine available right now — retrying shortly…",
@@ -363,18 +378,18 @@ let ownsStream = false;   // <-- ADDED
 //   { message: "No streamer available", ty: "FatalDescription" }
 //   { message: "Streamer is busy",      ty: "FatalDescription" }
 // to:
-		sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
-
-		  return ws.close();
-		}
+  		 return ws.close();
+        }
         if (!conn.attach(handleStreamerMessage)) {
           console.warn(`[Stream] streamer "${conn.id}" is busy`);
-          sendClientText({ DebugLog: { message: "Streamer is busy", ty: "FatalDescription" } });
+          //sendClientText({ DebugLog: { message: "Streamer is busy", ty: "FatalDescription" } });
+           
+          sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
           return ws.close();
         }
 
         streamer = conn; // has .send(); detached (not stopped) on close
-		ownsStream = true;   // <-- ADDED
+        ownsStream = true; // we successfully took the streamer
         console.log(`[Stream] attached to connected streamer "${conn.id}"`);
         streamer.send({ Init: built.payload });
       } else {
@@ -384,42 +399,64 @@ let ownsStream = false;   // <-- ADDED
         streamer.onExit = () => {
           if (ws.readyState === WebSocket.OPEN) ws.close();
         };
-		ownsStream = true;   // <-- ADDED
+        ownsStream = true; // spawned one for ourselves
         streamer.send({ Init: built.payload });
       }
     });
 
-    ws.on("close111", () => {
-		
-		if (!ownsStream) return;   // ADD: a rejected viewer never owned the stream, so bail
-
-
-      if (streamer) {
-        if (useConnectedStreamer && typeof streamer.detach === "function") {
-          // Tell the daemon to stop the current stream, then detach it so it
-          // stays connected and reusable for the next browser.
-          streamer.send("Stop");
-          streamer.detach();
-        } else if (typeof streamer.stop === "function") {
-          streamer.stop();
-        }
+    ws.on("close", () => {
+      // A rejected viewer (no free streamer / busy) never owned the stream.
+      // Do nothing on close - otherwise we'd cancel the app the CURRENT viewer
+      // is using and tear down their session.
+      if (!ownsStream) {
+        return;
       }
 
-      // Killing the streamer only drops the Moonlight client; Sunshine keeps the
-      // app running so it can be resumed. Explicitly cancel to free the machine.
-      if (!cancelOnDisconnect || !activeHost) return;
+      const spawned = streamer && !useConnectedStreamer;
+      const connected = streamer && useConnectedStreamer && typeof streamer.detach === "function";
+
+      // For the SPAWNED path, keep old behaviour: Stop kills the child, and the
+      // cancel-to-Sunshine (below) is done directly by Node.
+      if (spawned && typeof streamer.stop === "function") {
+        streamer.stop();
+      }
+
+      if (!cancelOnDisconnect || !activeHost) {
+        // No cancel wanted: still stop/detach the connected streamer.
+        if (connected) { streamer.send("Stop"); streamer.detach(); }
+        return;
+      }
 
       const hostKey = String(activeHost.id);
       if (pendingCancels.has(hostKey)) return; // already scheduled
 
+      // Keep a handle to the streamer for the deferred cancel (the outer
+      // `streamer` var could be reused if another browser attaches meanwhile;
+      // for single-streamer that isn't a concern, but capture it to be safe).
+      const conn = connected ? streamer : null;
+
+      // Mark draining IMMEDIATELY (synchronous), before any timer/await, so a
+      // viewer arriving in the same tick can't be handed this dying streamer.
+      if (conn) conn.draining = true;
+
       const fire = async () => {
         pendingCancels.delete(hostKey);
         try {
-          // Re-read: pairInfo may have changed since Init.
-          const host = ctx.storage.getHost(activeHost.id);
-          if (!host) return;
-          await moonlight.cancelApp(host, user.hostUniqueId);
-          console.log(`[Stream] app cancelled on host ${hostKey}, machine freed`);
+          if (conn) {
+            // NEW: route cancel THROUGH the streamer (co-located with Sunshine).
+            // Order matters: Cancel first so Sunshine quits the app, THEN Stop
+            // so the streamer tears down. Works same-box or remote.
+            conn.send("Cancel");
+            conn.send("Stop");
+            conn.detach();
+            console.log(`[Stream] cancel routed via streamer for host ${hostKey}`);
+          } else {
+            // SPAWNED path: Node calls Sunshine directly (same box only).
+            const host = ctx.storage.getHost(activeHost.id);
+            if (!host) return;
+            await moonlight.cancelApp(host, user.hostUniqueId);
+            console.log(`[Stream] app cancelled on host ${hostKey}, machine freed`);
+          }
         } catch (err) {
           console.warn(`[Stream] cancel failed on host ${hostKey}:`, err.message);
         }
@@ -434,79 +471,6 @@ let ownsStream = false;   // <-- ADDED
         fire();
       }
     });
-	
-	
-	ws.on("close", () => {
-	if (!ownsStream) return;   // rejected viewer never owned the stream
-
-		  const connected = streamer && useConnectedStreamer && typeof streamer.detach === "function";
-		  const spawned   = streamer && !useConnectedStreamer;
-
-		  // Spawned path unchanged: stop() kills the child.
-		  if (spawned && typeof streamer.stop === "function") {
-			streamer.stop();
-		  }
-
-		  if (!cancelOnDisconnect || !activeHost) {
-			// No cancel wanted: still stop/detach a connected streamer.
-			if (connected) { streamer.send("Stop"); streamer.detach(); }
-			return;
-		  }
-
-		  const hostKey = String(activeHost.id);
-		  if (pendingCancels.has(hostKey)) return; // already scheduled
-
-		  // Capture the connection for the deferred cancel.
-		  const conn = connected ? streamer : null;
-			if (conn) conn.draining = true;   // <-- this line
-		  const fire = async () => {
-			pendingCancels.delete(hostKey);
-			try {
-			  if (conn) {
-				// NEW: route cancel THROUGH the streamer (co-located with Sunshine).
-				// Order matters: Cancel first (Sunshine quits the app), then Stop
-				// (streamer tears down). Works same-box or remote.
-				conn.send("Cancel");
-				conn.send("Stop");
-				conn.detach();
-				console.log(`[Stream] cancel routed via streamer for host ${hostKey}`);
-			  } else {
-				// Spawned path: Node calls Sunshine directly (same box only).
-				const host = ctx.storage.getHost(activeHost.id);
-				if (!host) return;
-				await moonlight.cancelApp(host, user.hostUniqueId);
-				console.log(`[Stream] app cancelled on host ${hostKey}, machine freed`);
-			  }
-			} catch (err) {
-			  console.warn(`[Stream] cancel failed on host ${hostKey}:`, err.message);
-			}
-		  };
-
-		  if (graceSecs > 0) {
-			console.log(`[Stream] client gone; cancelling app on host ${hostKey} in ${graceSecs}s unless it reconnects`);
-			pendingCancels.set(hostKey, setTimeout(fire, graceSecs * 1000));
-		  } else {
-			fire();
-		  }
-		});
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
   });
 }
 

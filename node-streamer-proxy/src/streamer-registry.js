@@ -30,6 +30,62 @@ class StreamerConnection {
     // The currently-attached browser handler. Streamer -> browser messages are
     // routed here. null when idle.
     this.onMessage = null;
+    // In-flight request/response calls (e.g. GetAppList). Keyed by request id.
+    // The streamer echoes the id back so replies can be matched to callers.
+    this.pending = new Map();
+    this.nextRequestId = 1;
+  }
+
+  /**
+   * Send a request to the streamer and await its reply.
+   * Used for things Node needs FROM Sunshine but can't reach directly - the
+   * streamer is co-located with Sunshine, so it makes the call locally.
+   *
+   * Wire: Node -> {"type":"request","id":N,"method":"...","params":{...}}
+   *       Streamer -> {"type":"response","id":N,"ok":true,"result":...}
+   *                or {"type":"response","id":N,"ok":false,"error":"..."}
+   */
+  request(method, params = {}, timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+      if (!this.isAlive()) {
+        return reject(new Error("streamer not connected"));
+      }
+      const id = this.nextRequestId++;
+
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`streamer request "${method}" timed out`));
+      }, timeoutMs);
+
+      this.pending.set(id, { resolve, reject, timer });
+
+      try {
+        this.ws.send(JSON.stringify({ type: "request", id, method, params }));
+      } catch (err) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(err);
+      }
+    });
+  }
+
+  /** Called by the gateway when a {"type":"response"} frame arrives. */
+  handleResponse(msg) {
+    const entry = this.pending.get(msg.id);
+    if (!entry) return; // late/unknown reply
+    this.pending.delete(msg.id);
+    clearTimeout(entry.timer);
+    if (msg.ok) entry.resolve(msg.result);
+    else entry.reject(new Error(msg.error || "streamer request failed"));
+  }
+
+  /** Reject everything in flight (called on disconnect). */
+  failAllPending(reason) {
+    for (const [, entry] of this.pending) {
+      clearTimeout(entry.timer);
+      entry.reject(new Error(reason));
+    }
+    this.pending.clear();
   }
 
   /**
