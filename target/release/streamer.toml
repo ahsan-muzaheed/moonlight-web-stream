@@ -1,6 +1,7 @@
 # NEW websocket mode: streamer.exe runs standalone and dials OUT to Node.
 transport   = "websocket"
-server_url  = "ws://127.0.0.1:8080/api/streamer/connect"
+server_url1  = "ws://127.0.0.1:8080/api/streamer/connect"
+server_url  = "ws://connector_ms6.eagle3dstreaming.com:8081/api/streamer/connect"
 streamer_id = "streamer-1"
 auth_token  = "secret123"
 
@@ -11,3 +12,6 @@ auth_token  = "secret123"
 #   {app_directory}\{owner}\{appName}\{version}\{appName}.exe
 # and launches that. Absent params -> falls back to app-id launching.
 app_directory = "z:\\0.apps"
+
+sunshine_address   = "127.0.0.1"
+sunshine_http_port = 47989
