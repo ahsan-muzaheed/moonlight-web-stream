@@ -1,11 +1,10 @@
-﻿[package]
+[package]
 name = "streamer"
 version.workspace = true
 edition = "2024"
 license.workspace = true
 
 [dependencies]
-form_urlencoded = "1"
 moonlight-common = { workspace = true }
 common = { workspace = true }
 
@@ -15,6 +14,9 @@ bytes = { workspace = true }
 async-trait = { workspace = true }
 serde_json = { workspace = true }
 
+# URL-encoding for launch-query passthrough (url_origin/url_path/web_p_*).
+form_urlencoded = "1.2"
+
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 
@@ -22,6 +24,9 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 futures = { workspace = true }
 tokio-tungstenite = "0.24"
+# Cert strings arrive as JSON text in GetAppList requests and must be parsed
+# into pem::Pem (Init gets this for free via serde in common/src/ipc.rs).
+pem = { workspace = true }
 toml = "0.8"
 
 num = { workspace = true }

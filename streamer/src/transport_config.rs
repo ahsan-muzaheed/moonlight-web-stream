@@ -15,6 +15,8 @@
 //   server_url  = "ws://your-node-host:8080/api/streamer/connect"
 //   streamer_id = "streamer-1"
 //   auth_token  = "secret123"
+//   sunshine_address   = "127.0.0.1"   # optional, this is the default
+//   sunshine_http_port = 47989         # optional, this is the default
 //
 // Example for the OLD mode (or just omit the file entirely):
 //   transport = "stdio"
@@ -55,6 +57,21 @@ pub struct TransportConfig {
     #[serde(default)]
     pub auth_token: Option<String>,
 
+    /// Where Sunshine lives, as seen FROM THIS MACHINE. The streamer and
+    /// Sunshine are co-located, so the default localhost value is almost always
+    /// right. Having this in config (rather than waiting for Node to push it in
+    /// Init) is what lets the streamer answer GetAppList requests at any time -
+    /// Node needs the app list BEFORE it can build Init, so the streamer cannot
+    /// depend on Init to know where Sunshine is.
+    #[serde(default = "default_sunshine_address")]
+    pub sunshine_address: String,
+
+    /// Sunshine's GameStream HTTP port. The HTTPS port used for authenticated
+    /// requests (like /applist) is derived from it as http_port - 5, which is
+    /// the standard Sunshine offset (47989 -> 47984).
+    #[serde(default = "default_sunshine_http_port")]
+    pub sunshine_http_port: u16,
+
     /// Base directory for path-based app launching. When the browser URL
     /// supplies owner/appName/version, the streamer builds:
     ///   {app_directory}/{owner}/{appName}/{version}/{appName}.exe
@@ -68,6 +85,14 @@ fn default_streamer_id() -> String {
     "streamer".to_string()
 }
 
+fn default_sunshine_address() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_sunshine_http_port() -> u16 {
+    47989
+}
+
 impl Default for TransportConfig {
     fn default() -> Self {
         TransportConfig {
@@ -75,6 +100,8 @@ impl Default for TransportConfig {
             server_url: None,
             streamer_id: default_streamer_id(),
             auth_token: None,
+            sunshine_address: default_sunshine_address(),
+            sunshine_http_port: default_sunshine_http_port(),
             app_directory: None,
         }
     }

@@ -21,6 +21,14 @@ use common::ipc::{
     IpcReceiver, IpcSender, ServerIpcMessage, StreamerIpcMessage, create_stream_ipc,
 };
 use futures::{SinkExt, StreamExt};
+use moonlight_common::{
+    high::tokio::MoonlightHost,
+    http::{
+        ClientIdentifier, ClientSecret, ServerIdentifier,
+        client::tokio_hyper::TokioHyperClient,
+    },
+};
+use tokio::sync::mpsc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex};
 use tokio_tungstenite::{
     connect_async,
@@ -90,14 +98,41 @@ pub async fn connect_websocket_ipc(
     let (ipc_read_half, mut bridge_write) = duplex(64 * 1024); // Node -> streamer bytes
     let (mut bridge_read, ipc_write_half) = duplex(64 * 1024); // streamer -> Node bytes
 
+    // All outbound WS frames funnel through this channel, because two
+    // producers need the socket: the IPC bridge (task B) and the request
+    // handler (spawned from task A, replying to GetAppList). Only task B
+    // actually owns ws_write.
+    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
+
+    // Sunshine's location comes from OUR config, not from Node, so requests can
+    // be served before Init ever arrives.
+    let sunshine_address = cfg.sunshine_address.clone();
+    let sunshine_http_port = cfg.sunshine_http_port;
+
     // Task A: WS text frames from Node -> write JSON + '\n' into ipc_read_half.
     let span_a = span.clone();
+    // Cloned BEFORE the spawn: the closure takes ownership of whatever it
+    // captures, and the line-pump task below needs its own sender too.
+    let request_tx = out_tx.clone();
     tokio::spawn(async move {
         while let Some(item) = ws_read.next().await {
             match item {
                 Ok(Message::Text(text)) => {
-                    // Skip control frames (heartbeat) - only IPC JSON goes to the pipe.
-                    if is_control_frame(&text) {
+                    // Control frames (heartbeat, requests) never reach the IPC pipe.
+                    if let Some(kind) = control_frame_type(&text) {
+                        if kind == "request" {
+                            // Node is asking us to do something on its behalf -
+                            // typically fetch the app list from the Sunshine
+                            // running next to us. Handled off-task so a slow
+                            // HTTP call can't stall the message loop.
+                            let reply_tx = request_tx.clone();
+                            let addr = sunshine_address.clone();
+                            let span_req = span_a.clone();
+                            tokio::spawn(async move {
+                                handle_request(span_req, text, addr, sunshine_http_port, reply_tx)
+                                    .await;
+                            });
+                        }
                         continue;
                     }
                     if bridge_write.write_all(text.as_bytes()).await.is_err() {
@@ -122,6 +157,24 @@ pub async fn connect_websocket_ipc(
     // Task B: lines the streamer writes (StreamerIpcMessage JSON) -> WS text frames.
     let span_b = span.clone();
     tokio::spawn(async move {
+        // Single writer: everything bound for Node arrives on out_rx, whether
+        // it came from the IPC pipe (task B2 below) or from a request handler.
+        // Avoids select! over next_line(), whose cancellation behaviour would
+        // otherwise risk dropping half a line mid-read.
+        while let Some(msg) = out_rx.recv().await {
+            if ws_write.send(msg).await.is_err() {
+                warn!(parent: &span_b, "[ws] failed to send to Node");
+                break;
+            }
+        }
+    });
+
+    // Task B2: lines the streamer writes (StreamerIpcMessage JSON) -> outbound
+    // channel -> WS. Kept separate from the socket writer so there is exactly
+    // one thing touching ws_write.
+    let span_b2 = span.clone();
+    let line_tx = out_tx.clone();
+    tokio::spawn(async move {
         let mut lines = BufReader::new(&mut bridge_read).lines();
         loop {
             match lines.next_line().await {
@@ -129,14 +182,13 @@ pub async fn connect_websocket_ipc(
                     if line.is_empty() {
                         continue;
                     }
-                    if ws_write.send(Message::Text(line)).await.is_err() {
-                        warn!(parent: &span_b, "[ws] failed to send to Node");
-                        break;
+                    if line_tx.send(Message::Text(line)).is_err() {
+                        break; // writer gone
                     }
                 }
                 Ok(None) => break,
                 Err(err) => {
-                    warn!(parent: &span_b, "[ws] pipe read error: {err}");
+                    warn!(parent: &span_b2, "[ws] pipe read error: {err}");
                     break;
                 }
             }
@@ -157,11 +209,131 @@ pub async fn connect_websocket_ipc(
 }
 
 /// Control frames are small JSON objects carrying a top-level "type"
-/// (register/registered/ping/pong/error). Real IPC messages are the streamer's
-/// externally-tagged enum JSON and never have a top-level "type".
-fn is_control_frame(text: &str) -> bool {
-    match serde_json::from_str::<serde_json::Value>(text) {
-        Ok(v) => v.get("type").and_then(|t| t.as_str()).is_some(),
-        Err(_) => false,
-    }
+/// (register/registered/ping/pong/error/request). Real IPC messages are the
+/// streamer's externally-tagged enum JSON and never have a top-level "type",
+/// which is how the two are told apart. Returns the type when it is a control
+/// frame, so callers can dispatch on it.
+fn control_frame_type(text: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    v.get("type")
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Serve a request from Node.
+///
+/// Node cannot reach Sunshine in the connected architecture (Sunshine is
+/// private, only the streamer sits beside it), so it delegates. We take the
+/// ADDRESS from our own config and the CREDENTIALS from the request - Node did
+/// the pairing and owns the certs, we merely borrow them for this call.
+///
+/// Wire: in  {"type":"request","id":N,"method":"GetAppList","params":{...}}
+///       out {"type":"response","id":N,"ok":true,"result":[...]}
+///        or {"type":"response","id":N,"ok":false,"error":"..."}
+async fn handle_request(
+    span: Span,
+    text: String,
+    sunshine_address: String,
+    sunshine_http_port: u16,
+    reply_tx: mpsc::UnboundedSender<Message>,
+) {
+    let v: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(err) => {
+            warn!(parent: &span, "[ws] unparseable request: {err}");
+            return;
+        }
+    };
+
+    let id = v.get("id").cloned().unwrap_or(serde_json::Value::Null);
+    let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let params = v.get("params").cloned().unwrap_or(serde_json::Value::Null);
+
+    let result = match method {
+        "GetAppList" => {
+            get_app_list(&span, &sunshine_address, sunshine_http_port, &params).await
+        }
+        other => Err(format!("unknown request method '{other}'")),
+    };
+
+    let reply = match result {
+        Ok(value) => serde_json::json!({
+            "type": "response", "id": id, "ok": true, "result": value
+        }),
+        Err(err) => {
+            warn!(parent: &span, "[ws] request '{method}' failed: {err}");
+            serde_json::json!({
+                "type": "response", "id": id, "ok": false, "error": err
+            })
+        }
+    };
+
+    let _ = reply_tx.send(Message::Text(reply.to_string()));
+}
+
+/// Fetch the app list from the Sunshine on this machine.
+///
+/// A short-lived host is built per request rather than reusing the streaming
+/// host, because this can be called BEFORE Init has arrived (Node needs the app
+/// list in order to build Init at all) - so no streaming host exists yet.
+async fn get_app_list(
+    span: &Span,
+    address: &str,
+    http_port: u16,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let field = |name: &str| -> Result<String, String> {
+        params
+            .get(name)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| format!("GetAppList: missing '{name}'"))
+    };
+
+    let client_unique_id = field("client_unique_id")?;
+
+    // Certs arrive as raw PEM TEXT here. (Init doesn't need this step: serde
+    // decodes those fields straight into pem::Pem, see common/src/ipc.rs.)
+    let parse_pem = |name: &str, text: String| -> Result<pem::Pem, String> {
+        pem::parse(text.as_bytes()).map_err(|err| format!("GetAppList: bad '{name}' PEM: {err}"))
+    };
+
+    let client_private_key = parse_pem("client_private_key", field("client_private_key")?)?;
+    let client_certificate = parse_pem("client_certificate", field("client_certificate")?)?;
+    let server_certificate = parse_pem("server_certificate", field("server_certificate")?)?;
+
+    info!(parent: span, "[ws] GetAppList -> {address}:{http_port}");
+
+    let host: MoonlightHost<TokioHyperClient> =
+        MoonlightHost::new(address.to_string(), http_port, Some(client_unique_id))
+            .map_err(|err| format!("failed to create host: {err:?}"))?;
+
+    host.set_identity(
+        ClientIdentifier::from_pem(client_certificate),
+        ClientSecret::from_pem(client_private_key),
+        ServerIdentifier::from_pem(server_certificate),
+    )
+    .await
+    .map_err(|err| format!("failed to set pairing info: {err:?}"))?;
+
+    let apps = host
+        .app_list()
+        .await
+        .map_err(|err| format!("failed to fetch app list: {err:?}"))?;
+
+    // Shape matches what Node's own moonlight.listApps() returns, so callers
+    // can't tell which path produced the list.
+    let out: Vec<serde_json::Value> = apps
+        .iter()
+        .map(|app| {
+            serde_json::json!({
+                "app_id": app.id,
+                "title": app.title,
+                "is_hdr_supported": app.is_hdr_supported,
+            })
+        })
+        .collect();
+
+    info!(parent: span, "[ws] GetAppList -> {} apps", out.len());
+    Ok(serde_json::Value::Array(out))
 }
