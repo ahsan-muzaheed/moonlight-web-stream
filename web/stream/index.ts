@@ -90,29 +90,6 @@ function isFirefox(): boolean {
 const WEBRTC_CONNECT_TIMEOUT_MS = 15000
 const FALLBACK_RECONNECT_DELAY_MS = 500
 
-
-// ── add these two functions here ──
-function describeTerminationCode(code: number): string {
-    switch (code) {
-        case 0:    return "The stream ended."
-        case -100: return "No video was received from the host (check the host's network or firewall)."
-        case -101: return "The host stopped sending video."
-        case -102: return "The stream ended unexpectedly — the host app closed or the host went offline."
-        case -103: return "The stream stopped because protected (DRM) content was displayed."
-        case -104: return "A video processing error occurred on the host."
-        default:   return `The stream stopped (code ${code}).`
-    }
-}
-
-function describeShutdown(reason: TransportShutdown | undefined): string {
-    switch (reason) {
-        case "disconnect":      return "The stream ended."
-        case "failed":          return "Connection to the host was lost — it may have gone offline or the network dropped."
-        case "failednoconnect": return "Couldn't reach the host. It may be offline or unreachable."
-        default:                return "The stream stopped unexpectedly."
-    }
-}
-
 export class Stream implements Component {
     private logger: Logger = new Logger()
 
@@ -346,7 +323,7 @@ private reconnect() {
         } else if ("ConnectionTerminated" in message) {
             const code = message.ConnectionTerminated.error_code
 
-            this.debugLog(describeTerminationCode(code), { type: "fatalDescription" })   // was: `ConnectionTerminated with code ${code}`
+            this.debugLog(`ConnectionTerminated with code ${code}`, { type: "fatalDescription" })
         }
         // -- WebRTC Config
         else if ("Setup" in message) {
@@ -371,14 +348,15 @@ private reconnect() {
             }
         }
     }
-	let shutdownReason
+
     async startConnection() {
+        this.debugLog(`Permissions: ${JSON.stringify(this.permissions)}`)
+
+        const desiredTransport = this.transportOverride ?? this.settings.dataTransport
         this.debugLog(`Using transport: ${desiredTransport}`)
 
-         shutdownReason: TransportShutdown | undefined
-
         if (desiredTransport == "auto") {
-            shutdownReason = await this.tryWebRTCTransport()
+            let shutdownReason = await this.tryWebRTCTransport()
 
             if (shutdownReason == "failednoconnect") {
                 this.debugLog("Failed to establish WebRTC connection. Falling back to Web Socket transport.", { type: "ifErrorDescription" })
@@ -386,13 +364,12 @@ private reconnect() {
                 return
             }
         } else if (desiredTransport == "webrtc") {
-            shutdownReason = await this.tryWebRTCTransport()
+            await this.tryWebRTCTransport()
         } else if (desiredTransport == "websocket") {
-            shutdownReason = await this.tryWebSocketTransport()
+            await this.tryWebSocketTransport()
         }
 
-        // Reaching here means a transport promise resolved — the session has ended.
-        this.debugLog(describeShutdown(shutdownReason), { type: "fatal" })
+        this.debugLog("Tried all configured transport options but no connection was possible", { type: "fatal" })
     }
 
     private transport: Transport | null = null
