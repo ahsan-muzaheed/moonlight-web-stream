@@ -373,14 +373,16 @@ private reconnect() {
         }
     }
 
-    async startConnection() {
+  async startConnection() {
         this.debugLog(`Permissions: ${JSON.stringify(this.permissions)}`)
 
         const desiredTransport = this.transportOverride ?? this.settings.dataTransport
         this.debugLog(`Using transport: ${desiredTransport}`)
 
+        let shutdownReason: TransportShutdown | undefined
+
         if (desiredTransport == "auto") {
-            let shutdownReason = await this.tryWebRTCTransport()
+            shutdownReason = await this.tryWebRTCTransport()
 
             if (shutdownReason == "failednoconnect") {
                 this.debugLog("Failed to establish WebRTC connection. Falling back to Web Socket transport.", { type: "ifErrorDescription" })
@@ -388,14 +390,14 @@ private reconnect() {
                 return
             }
         } else if (desiredTransport == "webrtc") {
-            await this.tryWebRTCTransport()
+            shutdownReason = await this.tryWebRTCTransport()
         } else if (desiredTransport == "websocket") {
-            await this.tryWebSocketTransport()
+            shutdownReason = await this.tryWebSocketTransport()
         }
 
-        this.debugLog("Tried all configured transport options but no connection was possible", { type: "fatal" })
+        // Reaching here means a transport promise resolved — the session has ended.
+        this.debugLog(describeShutdown(shutdownReason), { type: "fatal" })
     }
-
     private transport: Transport | null = null
 
     private createControlWebSocket(): WebSocket {
@@ -683,7 +685,8 @@ private reconnect() {
             }
         })
     }
-    private async tryWebSocketTransport() {
+   // private async tryWebSocketTransport() {
+	  private async tryWebSocketTransport(): Promise<TransportShutdown | undefined> {
         if (!this.permissions.allow_transport_websockets) {
             this.debugLog("Not trying WebSocket transport becaues permissions disallow it")
             return
