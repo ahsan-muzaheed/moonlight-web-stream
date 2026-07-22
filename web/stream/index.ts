@@ -90,6 +90,30 @@ function isFirefox(): boolean {
 const WEBRTC_CONNECT_TIMEOUT_MS = 15000
 const FALLBACK_RECONNECT_DELAY_MS = 500
 
+
+
+// ── add these two functions here ──
+function describeTerminationCode(code: number): string {
+    switch (code) {
+        case 0:    return "The stream ended."
+        case -100: return "No video was received from the host (check the host's network or firewall)."
+        case -101: return "The host stopped sending video."
+        case -102: return "The stream ended unexpectedly — the host app closed or the host went offline."
+        case -103: return "The stream stopped because protected (DRM) content was displayed."
+        case -104: return "A video processing error occurred on the host."
+        default:   return `The stream stopped (code ${code}).`
+    }
+}
+
+function describeShutdown(reason: TransportShutdown | undefined): string {
+    switch (reason) {
+        case "disconnect":      return "The stream ended."
+        case "failed":          return "Connection to the host was lost — it may have gone offline or the network dropped."
+        case "failednoconnect": return "Couldn't reach the host. It may be offline or unreachable."
+        default:                return "The stream stopped unexpectedly."
+    }
+}
+
 export class Stream implements Component {
     private logger: Logger = new Logger()
 
