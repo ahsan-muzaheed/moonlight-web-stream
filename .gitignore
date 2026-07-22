@@ -31,3 +31,4 @@ web-server.exe
 /target/release/deps
 *.pdb
 node-streamer-proxy/package-lock.json
+/dist
