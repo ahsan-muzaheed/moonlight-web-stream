@@ -81,9 +81,57 @@ pub struct TransportConfig {
     pub app_directory: Option<String>,
 }
 
+// fn default_streamer_id() -> String {
+    // "streamer".to_string()
+// }
+
+/// Default streamer id: "<hostname>-<pid>", sanitized.
+///
+/// The hostname keeps ids human-readable and stable per machine; the PID suffix
+/// guarantees two streamers on the SAME machine never collide on one registry
+/// key. If two default ids ever matched, the registry's add() would drop one
+/// socket in favour of the other — this makes that impossible without anyone
+/// having to hand-set streamer_id in streamer.toml.
 fn default_streamer_id() -> String {
-    "streamer".to_string()
+    let host = hostname::get()
+        .ok()
+        .and_then(|h| h.into_string().ok())
+        .unwrap_or_else(|| "streamer".to_string());
+
+    let pid = std::process::id();
+
+    let host = sanitize_id_segment(&host);
+    let host = if host.is_empty() {
+        "streamer".to_string()
+    } else {
+        host
+    };
+
+    format!("{host}-{pid}")
 }
+
+/// Whitelist sanitizer: keep ASCII letters/digits/hyphen; turn every other
+/// character (space, underscore, dot, slash, backslash, colon, quotes, ...)
+/// into a hyphen; collapse runs of hyphens; trim them off both ends.
+///
+/// Whitelisting rather than blacklisting means any character we didn't think of
+/// is still made safe by default. Underscore is the notable one — it's why
+/// `connector_ms6` caused trouble as a host label — and it becomes a hyphen here.
+fn sanitize_id_segment(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut prev_hyphen = false;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            prev_hyphen = false;
+        } else if !prev_hyphen {
+            out.push('-');
+            prev_hyphen = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
 
 fn default_sunshine_address() -> String {
     "127.0.0.1".to_string()

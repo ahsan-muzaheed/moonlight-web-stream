@@ -2,7 +2,7 @@
 transport   = "websocket"
 server_url1  = "ws://127.0.0.1:8080/api/streamer/connect"
 server_url  = "ws://connector_ms6.eagle3dstreaming.com:8081/api/streamer/connect"
-streamer_id = "streamer-1"
+streamer_id1 = "streamer-1"
 auth_token  = "secret123"
 
 # OLD mode (or just delete this file entirely):
