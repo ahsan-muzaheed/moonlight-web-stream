@@ -385,6 +385,10 @@ if (state === "failed" || state === "closed") {
 
         this.peer?.close()
     }
+	
+	 private prevFramesDecoded: number | undefined
+    private prevStatsTimestamp: number | undefined
+
 
     async getStats(): Promise<Record<string, StatValue>> {
         const statsData: Record<string, StatValue> = {}
@@ -409,6 +413,20 @@ if (state === "failed" || state === "closed") {
             }
             if ("framesPerSecond" in value && value.framesPerSecond != null) {
                 statsData.webrtcFps = value.framesPerSecond
+            }
+			
+			 if ("framesDecoded" in value && value.framesDecoded != null) {
+                statsData.webrtcFramesDecoded = value.framesDecoded
+                if (this.prevFramesDecoded != null && this.prevStatsTimestamp != null) {
+                    const dFrames = value.framesDecoded - this.prevFramesDecoded
+                    const dMs = value.timestamp - this.prevStatsTimestamp
+                    if (dMs > 0) {
+                        statsData.webrtcFpsMeasured =
+                            Math.round(((dFrames * 1000) / dMs) * 10) / 10
+                    }
+                }
+                this.prevFramesDecoded = value.framesDecoded
+                this.prevStatsTimestamp = value.timestamp
             }
 
             if ("jitterBufferDelay" in value && value.jitterBufferDelay != null) {
