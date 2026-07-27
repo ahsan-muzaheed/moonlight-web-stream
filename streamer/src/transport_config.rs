@@ -49,9 +49,17 @@ pub struct TransportConfig {
     #[serde(default)]
     pub server_url: Option<String>,
 
-    /// Identifies this streamer to the Node registry. Defaults to "streamer".
+   /// Identifies this streamer to the Node registry. Defaults to "streamer".
     #[serde(default = "default_streamer_id")]
     pub streamer_id: String,
+
+    /// STABLE machine identifier = hostname only (no PID suffix), so it survives
+    /// restarts. This is the value Copy-URL share links carry (?machineid=): the
+    /// link targets the MACHINE, and the Node registry maps it to whichever
+    /// streamer on that machine is free. Two streamers on one box share this;
+    /// they are told apart by streamer_id.
+    #[serde(default = "default_machine_id")]
+    pub machine_id: String,
 
     /// Shared secret sent in the register handshake. Optional in dev.
     #[serde(default)]
@@ -92,24 +100,23 @@ pub struct TransportConfig {
 /// key. If two default ids ever matched, the registry's add() would drop one
 /// socket in favour of the other — this makes that impossible without anyone
 /// having to hand-set streamer_id in streamer.toml.
-fn default_streamer_id() -> String {
+fn default_machine_id() -> String {
     let host = hostname::get()
         .ok()
         .and_then(|h| h.into_string().ok())
         .unwrap_or_else(|| "streamer".to_string());
 
-    let pid = std::process::id();
-
     let host = sanitize_id_segment(&host);
-    let host = if host.is_empty() {
+    if host.is_empty() {
         "streamer".to_string()
     } else {
         host
-    };
-
-    format!("{host}-{pid}")
+    }
 }
 
+fn default_streamer_id() -> String {
+    format!("{}-{}", default_machine_id(), std::process::id())
+}
 /// Whitelist sanitizer: keep ASCII letters/digits/hyphen; turn every other
 /// character (space, underscore, dot, slash, backslash, colon, quotes, ...)
 /// into a hyphen; collapse runs of hyphens; trim them off both ends.
@@ -147,6 +154,7 @@ impl Default for TransportConfig {
             transport: TransportMode::Stdio,
             server_url: None,
             streamer_id: default_streamer_id(),
+			   machine_id: default_machine_id(),
             auth_token: None,
             sunshine_address: default_sunshine_address(),
             sunshine_http_port: default_sunshine_http_port(),

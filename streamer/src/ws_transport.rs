@@ -52,7 +52,10 @@ pub async fn connect_websocket_ipc(
     info!("[ws] connecting to {url}");
     let request = url.into_client_request()?;
     let (ws_stream, _resp) = connect_async(request).await?;
-    info!("[ws] connected, registering as '{}'", cfg.streamer_id);
+   info!(
+        "[ws] connected, registering as '{}' (machine '{}')",
+        cfg.streamer_id, cfg.machine_id
+    );
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
@@ -60,6 +63,7 @@ pub async fn connect_websocket_ipc(
     let register = serde_json::json!({
         "type": "register",
         "id": cfg.streamer_id,
+        "machine_id": cfg.machine_id,
         "token": cfg.auth_token,
     });
     ws_write.send(Message::Text(register.to_string())).await?;
