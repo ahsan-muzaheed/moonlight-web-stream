@@ -4,6 +4,7 @@ import { App } from "../../api_bindings.js";
 import { getCurrentLanguage, getTranslations } from "../../i18n.js";
 import { setContextMenu } from "../context_menu.js";
 import { showMessage } from "../modal/index.js";
+import { showNotification } from "../notification.js";
 import { APP_NO_IMAGE } from "../../resources/index.js";
 import { buildUrl } from "../../config_.js";
 
@@ -134,7 +135,12 @@ export class Game implements Component {
             this.divElement.dispatchEvent(event)
         }
     }
-    private startStream() {
+
+    // Absolute, shareable deep link to this exact app on this exact host.
+    // buildUrl() already prefixes window.location.origin (+ configured path_prefix),
+    // so the result can be pasted into any browser.
+    // demoParam is forwarded from the current URL if present, matching startStream().
+    getStreamUrl(): string {
         const query = new URLSearchParams({
             hostId: this.getHostId(),
             appId: this.getAppId(),
@@ -143,13 +149,32 @@ export class Game implements Component {
         if (demoParam != null) {
             query.set("demoParam", demoParam)
         }
+        return buildUrl(`/stream.html?${query}`)
+    }
+
+    private startStream() {
+        const url = this.getStreamUrl()
 
         if (window.matchMedia('(display-mode: standalone)').matches) {
             // If we're in a pwa: open in the current tab
             // If we don't do this we might get a url bar at the top
-            window.location.href = buildUrl(`/stream.html?${query}`)
+            window.location.href = url
         } else {
-            window.open(buildUrl(`/stream.html?${query}`), "_blank")
+            window.open(url, "_blank")
+        }
+    }
+
+    private async copyStreamUrl() {
+        const i = getTranslations(getCurrentLanguage()).game
+        const url = this.getStreamUrl()
+
+        try {
+            // Clipboard API requires a secure context (https or localhost).
+            await navigator.clipboard.writeText(url)
+            showNotification(i.copyUrlSuccess, "info")
+        } catch (e) {
+            // Blocked or insecure context -> show the URL so it can be copied manually.
+            await showMessage(url)
         }
     }
 
@@ -169,6 +194,13 @@ export class Game implements Component {
 
                 const event = new ComponentEvent("ml-gamereload", this)
                 this.divElement.dispatchEvent(event)
+            }
+        })
+
+        elements.push({
+            name: i.copyUrl,
+            callback: async () => {
+                await this.copyStreamUrl()
             }
         })
 
