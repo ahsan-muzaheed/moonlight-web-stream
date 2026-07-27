@@ -165,13 +165,12 @@ export class Game implements Component {
     }
 
     private async copyStreamUrl() {
-        const i = getTranslations(getCurrentLanguage()).game
         const url = this.getStreamUrl()
 
         try {
             // Clipboard API requires a secure context (https or localhost).
             await navigator.clipboard.writeText(url)
-            showNotification(i.copyUrlSuccess, "info")
+            showNotification("Stream link copied to clipboard", "info")
         } catch (e) {
             // Blocked or insecure context -> show the URL so it can be copied manually.
             await showMessage(url)
@@ -198,7 +197,7 @@ export class Game implements Component {
         })
 
         elements.push({
-            name: i.copyUrl,
+            name: "Copy URL",
             callback: async () => {
                 await this.copyStreamUrl()
             }
