@@ -4,6 +4,7 @@ import { App } from "../../api_bindings.js";
 import { getCurrentLanguage, getTranslations } from "../../i18n.js";
 import { setContextMenu } from "../context_menu.js";
 import { showMessage } from "../modal/index.js";
+import { showNotification } from "../notification.js";
 import { APP_NO_IMAGE } from "../../resources/index.js";
 import { buildUrl } from "../../config_.js";
 
@@ -134,7 +135,7 @@ export class Game implements Component {
             this.divElement.dispatchEvent(event)
         }
     }
-    private startStream() {
+/*     private startStream() {
         const query = new URLSearchParams({
             hostId: this.getHostId(),
             appId: this.getAppId(),
@@ -151,6 +152,37 @@ export class Game implements Component {
         } else {
             window.open(buildUrl(`/stream.html?${query}`), "_blank")
         }
+    } */
+	
+	getStreamUrl(): string {
+        const query = new URLSearchParams({
+            hostId: this.getHostId(),
+            appId: this.getAppId(),
+        } as any)
+        const demoParam = new URLSearchParams(location.search).get("demoParam")
+        if (demoParam != null) {
+            query.set("demoParam", demoParam)
+        }
+        return buildUrl(`/stream.html?${query}`)
+    }
+
+    private startStream() {
+        const url = this.getStreamUrl()
+        if (window.matchMedia('(display-mode: standalone)').matches) {
+            window.location.href = url
+        } else {
+            window.open(url, "_blank")
+        }
+    }
+
+    private async copyStreamUrl() {
+        const url = this.getStreamUrl()
+        try {
+            await navigator.clipboard.writeText(url)
+            showNotification("Stream link copied to clipboard", "info")
+        } catch (e) {
+            await showMessage(url)
+        }
     }
 
     private onContextMenu(event: MouseEvent) {
@@ -162,13 +194,20 @@ export class Game implements Component {
             callback: this.showDetails.bind(this),
         })
 
-        elements.push({
+      elements.push({
             name: i.open,
             callback: async () => {
                 this.startStream()
 
                 const event = new ComponentEvent("ml-gamereload", this)
                 this.divElement.dispatchEvent(event)
+            }
+        })
+
+        elements.push({
+            name: "Copy URL",
+            callback: async () => {
+                await this.copyStreamUrl()
             }
         })
 
