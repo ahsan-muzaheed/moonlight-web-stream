@@ -7,7 +7,7 @@ const WebSocket = require("ws");
  *   GET /api/streamer/connect
  *
  * Handshake (this step only - no browser relay yet):
- *   1. streamer opens the WS and sends:  { "type":"register", "id":"<streamer_id>", "token":"<auth_token>" }
+*   1. streamer opens the WS and sends:  { "type":"register", "id":"<streamer_id>", "machine_id":"<hostname>", "token":"<auth_token>" }
  *   2. Node checks the token, registers the connection, replies:
  *        { "type":"registered", "id":"<id>" }        on success
  *        { "type":"error", "reason":"..." } + close   on failure
@@ -81,8 +81,10 @@ function registerStreamerEndpoint(app, ctx, registry) {
           return ws.close();
         }
 
-        clearTimeout(registerTimer);
-        registered = registry.add(msg.id, ws);
+clearTimeout(registerTimer);
+        const machineId =
+          typeof msg.machine_id === "string" && msg.machine_id ? msg.machine_id : null;
+        registered = registry.add(msg.id, ws, machineId);
         safeSend(ws, { type: "registered", id: msg.id });
         return;
       }

@@ -17,8 +17,9 @@
  */
 
 class StreamerConnection {
-  constructor(id, ws) {
+  constructor(id, ws, machineId) {
     this.id = id;
+    this.machineId = machineId || null;
     this.ws = ws;
     this.connectedAt = Date.now();
     this.lastSeen = Date.now();
@@ -131,43 +132,66 @@ class StreamerConnection {
 
 class StreamerRegistry {
   constructor() {
-    this.byId = new Map(); // id -> StreamerConnection
+    this.byId = new Map();
+    this.byMachine = new Map();
   }
 
-  add(id, ws) {
-    // If a streamer with this id was already connected, drop the stale one.
+  add(id, ws, machineId) {
     const existing = this.byId.get(id);
     if (existing && existing.ws !== ws) {
       console.warn(`[Registry] streamer "${id}" reconnected, replacing old socket`);
-      try {
-        existing.ws.close();
-      } catch {
-        /* ignore */
-      }
+      this._deindexMachine(existing);
+      try { existing.ws.close(); } catch { /* ignore */ }
     }
 
-    const conn = new StreamerConnection(id, ws);
+    const conn = new StreamerConnection(id, ws, machineId);
     this.byId.set(id, conn);
-    console.log(`[Registry] streamer "${id}" registered (${this.byId.size} total)`);
+    if (conn.machineId) {
+      let set = this.byMachine.get(conn.machineId);
+      if (!set) { set = new Set(); this.byMachine.set(conn.machineId, set); }
+      set.add(id);
+    }
+    console.log(
+      `[Registry] streamer "${id}" registered on machine "${conn.machineId || "?"}" (${this.byId.size} total)`
+    );
     return conn;
   }
 
   remove(id, ws) {
     const conn = this.byId.get(id);
-    // Only remove if it's the same socket (avoid a late close nuking a reconnect).
     if (conn && conn.ws === ws) {
       this.byId.delete(id);
+      this._deindexMachine(conn);
       console.log(`[Registry] streamer "${id}" removed (${this.byId.size} left)`);
     }
   }
 
-  get(id) {
+  _deindexMachine(conn) {
+    if (!conn || !conn.machineId) return;
+    const set = this.byMachine.get(conn.machineId);
+    if (!set) return;
+    set.delete(conn.id);
+    if (set.size === 0) this.byMachine.delete(conn.machineId);
+  }
+
+get(id) {
     return this.byId.get(id) || null;
+  }
+
+  pickByMachineId(machineId) {
+    const set = this.byMachine.get(machineId);
+    if (!set || set.size === 0) return null;
+    for (const id of set) {
+      const conn = this.byId.get(id);
+      if (conn && conn.isAvailable()) return conn;
+    }
+    return null;
   }
 
   list() {
     return Array.from(this.byId.values()).map((c) => ({
       id: c.id,
+      machineId: c.machineId,
       busy: c.busy,
       draining: c.draining,
       connectedAt: c.connectedAt,

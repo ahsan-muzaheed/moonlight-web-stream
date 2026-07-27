@@ -254,6 +254,7 @@ function registerStreamRoutes(app, ctx) {
     // Streamer chosen for this session. Picked before Init is built because it
     // is also our route to Sunshine for the app list.
     let pickedConn = null;
+    let requestedTarget = null;
 
     const sendClientText = (inner) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(inner));
@@ -293,16 +294,25 @@ function registerStreamRoutes(app, ctx) {
       try {
         // In connected mode, choose the streamer FIRST: it is our route to
         // Sunshine (app list lookup), and we need it before building Init.
-        if (useConnectedStreamer) {
-          const wantId = (init.url_params && init.url_params.streamer) || null;
-          pickedConn = wantId
-            ? registry.get(wantId)
-            : registry
-                .list()
-                .filter((st) => !st.busy && !st.draining && st.alive)
-                .map((st) => registry.get(st.id))[0];
-        }
+		if (useConnectedStreamer) {
+          const params = init.url_params || {};
+          const wantStreamerId = params.streamer || null;
+          const wantMachineId = params.machineid || null;
 
+          if (wantStreamerId) {
+            requestedTarget = { kind: "streamer", id: wantStreamerId };
+            pickedConn = registry.get(wantStreamerId);
+          } else if (wantMachineId) {
+            requestedTarget = { kind: "machine", id: wantMachineId };
+            pickedConn = registry.pickByMachineId(wantMachineId);
+          } else {
+            pickedConn = registry
+              .list()
+              .filter((st) => !st.busy && !st.draining && st.alive)
+              .map((st) => registry.get(st.id))[0];
+          }
+        }
+		
         built = await buildInitPayload(ctx, user, {
           hostId: init.host_id,
           appId: init.app_id,
@@ -356,16 +366,32 @@ function registerStreamRoutes(app, ctx) {
         const conn = pickedConn;
 
 		 // If a requested-by-id streamer is draining/busy, treat as unavailable.
+        // const usable = conn && typeof conn.isAvailable === "function" ? conn.isAvailable() : !!conn;
+        // if (conn && !usable) {
+          // console.warn("[Stream] requested streamer not available (busy/draining)");
+          // sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
+          // return ws.close();
+        // }
+		
+		
+		const unavailableMsg =
+          requestedTarget && requestedTarget.kind === "machine"
+            ? `Machine "${requestedTarget.id}" is unavailable`
+            : requestedTarget && requestedTarget.kind === "streamer"
+            ? `Streamer "${requestedTarget.id}" is unavailable`
+            : "No machine available";
+
         const usable = conn && typeof conn.isAvailable === "function" ? conn.isAvailable() : !!conn;
         if (conn && !usable) {
-          console.warn("[Stream] requested streamer not available (busy/draining)");
-          sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
+          console.warn(`[Stream] target not available: ${unavailableMsg}`);
+          sendClientText({ DebugLog: { message: unavailableMsg, ty: "Retryable" } });
           return ws.close();
         }
+		
 
-        if (!conn) {
-          console.warn("[Stream] no connected streamer available");
-          sendClientText({ DebugLog: { message: "No machine available", ty: "Retryable" } });
+		if (!conn) {
+          console.warn(`[Stream] target unavailable: ${unavailableMsg}`);
+          sendClientText({ DebugLog: { message: unavailableMsg, ty: "Retryable" } });
 	  
 		  /* sendClientText({
 			DebugLog: {
