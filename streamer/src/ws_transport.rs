@@ -108,11 +108,19 @@ pub async fn connect_websocket_ipc(
     // actually owns ws_write.
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
 
-    // Sunshine's location comes from OUR config, not from Node, so requests can
+	// Sunshine's location comes from OUR config, not from Node, so requests can
     // be served before Init ever arrives.
     let sunshine_address = cfg.sunshine_address.clone();
     let sunshine_http_port = cfg.sunshine_http_port;
-
+    // Copy-URL: this machine's own stable id, already computed at startup
+    // (transport_config.rs default_machine_id()). GetMachineInfo answers from
+    // this directly - no HTTP call to Sunshine, no dependency on Sunshine (or
+    // this box) having any reachable/static address. Same value Sunshine's own
+    // util::sanitize_machine_id(get_host_name()) would report, since they run
+    // on the same machine and apply the identical sanitize rule.
+    let machine_id = cfg.machine_id.clone();
+	
+	
     // Task A: WS text frames from Node -> write JSON + '\n' into ipc_read_half.
     let span_a = span.clone();
     // Cloned BEFORE the spawn: the closure takes ownership of whatever it
@@ -129,11 +137,12 @@ pub async fn connect_websocket_ipc(
                             // typically fetch the app list from the Sunshine
                             // running next to us. Handled off-task so a slow
                             // HTTP call can't stall the message loop.
-                            let reply_tx = request_tx.clone();
+							let reply_tx = request_tx.clone();
                             let addr = sunshine_address.clone();
+                            let mid = machine_id.clone();
                             let span_req = span_a.clone();
                             tokio::spawn(async move {
-                                handle_request(span_req, text, addr, sunshine_http_port, reply_tx)
+                                handle_request(span_req, text, addr, sunshine_http_port, mid, reply_tx)
                                     .await;
                             });
                         }
@@ -239,6 +248,7 @@ async fn handle_request(
     text: String,
     sunshine_address: String,
     sunshine_http_port: u16,
+    machine_id: String,
     reply_tx: mpsc::UnboundedSender<Message>,
 ) {
     let v: serde_json::Value = match serde_json::from_str(&text) {
@@ -257,6 +267,11 @@ async fn handle_request(
         "GetAppList" => {
             get_app_list(&span, &sunshine_address, sunshine_http_port, &params).await
         }
+        // Copy-URL: Node asks the streamer (already dialed-out, reachable
+        // regardless of any static/public IP) for its machine id, rather than
+        // Node calling Sunshine's HTTP API directly. Answered from our own
+        // config - no network call, no address dependency at all.
+        "GetMachineInfo" => Ok(serde_json::json!({ "machineid": machine_id })),
         other => Err(format!("unknown request method '{other}'")),
     };
 
