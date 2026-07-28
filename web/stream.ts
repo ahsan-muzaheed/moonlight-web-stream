@@ -47,6 +47,12 @@ if (hostIdStr === null && isPrettyUrl) {
 
 const appIdStr = queryParams.get("appId")
 const appNameStr = queryParams.get("appName")
+// Copy-URL from Sunshine's Apps page carries machineid instead of hostId
+// (Sunshine has no hostId - it's Node's bookkeeping id, not the machine's).
+// Node resolves the host from machineid on its own; the frontend only needs
+// to know it's not required to reject the link for lacking hostId.
+const machineIdStr = queryParams.get("machineid")
+
 
 let appStr = queryParams.get("app")
 let ownerStr = queryParams.get("owner")
@@ -70,14 +76,19 @@ if (isPrettyUrl) {
     }
 }
 
-if (!hostIdStr || (!appIdStr && !appNameStr && !appStr)) {
+if ((!hostIdStr && !machineIdStr) || (!appIdStr && !appNameStr && !appStr)) {
     await showMessage(I.stream.missingHostOrApp)
     window.close()
     return
 }
 
 
-    const hostId = Number.parseInt(hostIdStr)
+    // hostIdStr can legitimately be null now (machineid-only Copy-URL link).
+    // NaN -> JSON.stringify emits null -> Node's buildInitPayload treats a
+    // null host_id as "resolve by machineid instead" (see stream.js).
+    const hostId = hostIdStr ? Number.parseInt(hostIdStr) : NaN
+	
+	
     //const appId = Number.parseInt(appIdStr)
 	const appId = appIdStr ? Number.parseInt(appIdStr) : 0
     const demoParam = queryParams.get("demoParam")
