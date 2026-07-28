@@ -308,4 +308,13 @@ async function appImage(host, uniqueId, appId) {
   );
 }
 
-module.exports = { serverInfo, pair, unpair, cancelApp, listApps, appImage, httpsPortOf };
+
+module.exports = {
+  serverInfo,
+  pair,
+  unpair,
+  cancelApp,
+  listApps,
+  appImage,
+  httpsPortOf,
+};

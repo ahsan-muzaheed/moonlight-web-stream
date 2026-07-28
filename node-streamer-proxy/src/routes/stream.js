@@ -312,7 +312,7 @@ function registerStreamRoutes(app, ctx) {
               .map((st) => registry.get(st.id))[0];
           }
         }
-		
+		console.log("[Stream] picked:", pickedConn ? `streamer=${pickedConn.id} machine=${pickedConn.machineId} alive=${pickedConn.isAlive()}` : "NONE", "requested:", JSON.stringify(requestedTarget));
         built = await buildInitPayload(ctx, user, {
           hostId: init.host_id,
           appId: init.app_id,

@@ -146,17 +146,82 @@ function hostRoutes(ctx) {
     // Phase 1 result: show the user the PIN to type into Sunshine.
     res.write(JSON.stringify({ Pin: pin }) + "\n");
 
-    try {
+	try {
       const pairInfo = await moonlight.pair(host, uniqueId(req.user), pin);
       storage.setPairInfo(host.id, pairInfo);
+
+      // Copy-URL: this host has no machineId link yet. Node can't guess
+      // which connected streamer (if any) belongs to a brand-new host - see
+      // POST /host/refresh-machine-info, which the operator calls once,
+      // naming the streamer, after it dials in. Until then, links to this
+      // host need ?hostId= (machineid-only links will 404 with HostNotFound).
+      console.log(
+        `[Pair] host ${host.id} paired. Call POST /api/host/refresh-machine-info ` +
+        "{ host_id, machine_id } once its streamer is connected to enable machineid-only Copy-URL links."
+      );
+
       res.write(JSON.stringify({ Paired: publicHost(storage.getHost(host.id)) }) + "\n");
     } catch (err) {
       console.warn("[Pair] failed:", err.message);
       res.write(JSON.stringify({ PairError: err.message }) + "\n");
     }
+	
     res.end();
   });
 
+  // ---- Refresh a paired host's machineId without re-pairing --------------
+  // Fixes hosts paired BEFORE the auto-capture-at-pairing-time logic above
+  // existed (their storage.json record has no machineId, so a Copy-URL
+  // machineid-only link 404s with HostNotFound even though the host is
+  // paired and reachable). Re-running the full PIN handshake just to pick up
+  // one field is unnecessary and disruptive - this hits the same paired
+  // /api/machine-info endpoint the pairing flow does, using the cert this
+  // host already has, and just patches the one field. 
+	router.post("/host/refresh-machine-info", auth, async (req, res) => {
+	
+	console.log(`/host/refresh-machine-info`)
+	
+    let host;
+    try {
+      host = storage.getHostForUser(req.user, req.body.host_id);
+    } catch (err) {
+      return res.status(errStatus(err)).json({ error: err.message });
+    }
+
+    const { machine_id: wantMachineId, streamer_id: wantStreamerId } = req.body;
+    let conn = null;
+    if (wantStreamerId) {
+      conn = ctx.streamerRegistry.get(wantStreamerId);
+    } else if (wantMachineId) {
+      conn = ctx.streamerRegistry.pickByMachineId(wantMachineId);
+    }
+    if (!conn) {
+      return res.status(409).json({
+        error:
+          "NoStreamerConnected: pass machine_id or streamer_id for a currently-connected " +
+          "streamer (see GET /api/streamer/list)",
+      });
+    }
+
+    try {
+      const result = await conn.request("GetMachineInfo", {});
+      const machineId = result && result.machineid;
+      if (!machineId) {
+        throw new Error("streamer returned no machineid");
+      }
+      storage.patchHost(host.id, { machineId });
+      console.log(
+        `[MachineInfo] host ${host.id} linked to machine "${machineId}" ` +
+        `(via streamer "${conn.id}")`
+      );
+      res.json({ host_id: host.id, machine_id: machineId });
+    } catch (err) {
+      console.warn(`[MachineInfo] host ${host.id} refresh failed:`, err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+  
+  
   // ---- Cancel the running app (Rust: POST /host/cancel) ------------------
   // The frontend's "quit" button calls this (web/api.ts:422). Closing the tab
   // only kills the streamer; Sunshine keeps the app running on purpose so the
