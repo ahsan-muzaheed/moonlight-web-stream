@@ -231,6 +231,20 @@ class Storage {
     return id === null ? null : this.data.hosts[id] || null;
   }
 
+  /** Reverse lookup: stable machine id (hostname) -> host record. */
+  getHostByMachineId(machineId) {
+    if (!machineId) return null;
+    return this.listHosts().find((h) => h.machineId === machineId) || null;
+  }
+
+  /** Same ownership rule as getHostForUser, but keyed by machineId. */
+  getHostByMachineIdForUser(user, machineId) {
+    const host = this.getHostByMachineId(machineId);
+    if (!host) throw new Error("HostNotFound");
+    if (!this.isAdmin(user) && host.ownerId !== user.id) throw new Error("Forbidden");
+    return host;
+  }
+
   /** Throws unless the user owns the host (or is an admin). */
   getHostForUser(user, hostId) {
     const host = this.getHost(hostId);
@@ -238,6 +252,7 @@ class Storage {
     if (!this.isAdmin(user) && host.ownerId !== user.id) throw new Error("Forbidden");
     return host;
   }
+  
 
   addHost({ address, httpPort, ownerId }) {
     const id = this._allocId("host");

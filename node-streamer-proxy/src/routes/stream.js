@@ -128,7 +128,12 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
  
   const { storage, config } = ctx;
  
-  const host = storage.getHostForUser(user, hostId); // throws HostNotFound/Forbidden
+ // const host = storage.getHostForUser(user, hostId); // throws HostNotFound/Forbidden
+  
+  const host = hostId
+    ? storage.getHostForUser(user, hostId) // throws HostNotFound/Forbidden
+    : storage.getHostByMachineIdForUser(user, urlParams && urlParams.machineid);
+	
   if (!host.pairInfo) throw new Error("HostNotPaired");
  
   // Prefer an app NAME if the URL supplied one - ids are CRC32(name+image), so
