@@ -36,7 +36,7 @@
     "include_loopback_candidates": true
   },
   "web_server": {
-    "bind_address": "0.0.0.0:8080",
+    "bind_address1": "0.0.0.0:8080",
     "certificate": null,
     "url_path_prefix": "",
     "session_cookie_secure": false,
