@@ -743,3 +743,64 @@ code. Trust this file, not that one, for file/line specifics.
   fixed this session (section 6).
 
 ---
+
+
+## Change 2 done — Capture a single window, not the whole desktop
+
+**Problem being solved:** the app is windowed-only and can't go fullscreen. Streaming the whole desktop wastes pixels and encoder bandwidth on empty background.
+
+**Two approaches were considered:**
+
+- **Crop:** capture the full desktop, then crop to the window's rectangle before encoding. Cheap, but still grabs everything, and breaks when the window moves or something overlaps it. **Rejected.**
+- **True per-window capture:** ask the OS for that window's pixels directly, even when partially occluded. Harder, but correct. **This is the one I want.**
+
+**Approach on Windows:** the **Windows Graphics Capture API** (`GraphicsCaptureItem`, via `IGraphicsCaptureItemInterop::CreateForWindow`) can capture a single `HWND` directly. Sunshine already has a WGC-based display backend, so the goal is to **extend/parallel that backend with a window-capture variant** rather than write one from scratch.
+
+**Flow to implement, end to end:**
+
+1. Launch request arrives carrying the app name.
+2. Match name → `.exe` path (Change 1) → launch the process.
+3. Find the process's **main window handle** (`HWND`) — poll/wait briefly, since the window won't exist the instant the process starts.
+4. Hand that `HWND` to the window-capture path (`CreateForWindow`) instead of the display-duplication path.
+5. Feed the resulting frames to the **existing encoder unchanged**. Same handoff, same format; everything downstream is untouched.
+
+
+
+
+## Addendum — machineId Copy-URL architecture (verified against `node-streamer-proxy`, branch `ahsan4-ws-ss---streamer`, commit `5ac31a7`)
+
+**Correction to the earlier handoff:** the claim that "the Node.js signaling server / streamer registry doesn't exist in this repo" is **wrong**. `node-streamer-proxy/` has existed since this branch's first commit (`b0c75be`) and is a full parallel Express + `ws` implementation of the Rust actix-web server, including the dial-out streamer architecture the first-half CLAUDE.md content described. Anchor by file path under `node-streamer-proxy/src/`, not by "does this exist" — it does.
+
+### What's actually built
+
+**Two ID spaces, not one.** `host_id` (Rust/Node: `storage.getHost(id)`) is a small integer, scoped to one user's paired-host list — the same physical box can be `host_id=1` for Alice and `host_id=2` (or absent) for Bob. `machineId` is the stable, global identifier (streamer-reported hostname) that a Copy-URL link actually carries. These are different fields on the same `host` record (`storage.json`: `{ id, machineId, ownerId, pairInfo, ... }`), not different names for the same thing.
+
+**Streamer dial-out + registry** (`node-streamer-proxy/src/streamer-endpoint.js`, `src/streamer-registry.js`)
+- Streamer opens `GET /api/streamer/connect` (ws), sends `{ type: "register", id, machine_id: <hostname>, token }`.
+- `expectedToken` = `config.streamer_gateway.token`; unset = dev-mode, any streamer accepted (logged as a warning — worth locking down before real distribution).
+- `StreamerRegistry` indexes connections both `byId` and `byMachine` (`Map<machineId, Set<streamerId>>`) — multiple streamers per machine already supported structurally, single-streamer-per-machine is just today's usage pattern.
+- `StreamerConnection.isAvailable()` = alive && !busy && !draining. `pickByMachineId(machineId)` returns the first available conn on that machine, or `null`.
+- Node↔streamer request/response (`conn.request(method, params)`) is used for calls Node needs answered locally on the streamer's box (e.g. `GetAppList`, `GetMachineInfo`) — this is how Node reaches Sunshine without a direct route to it, which is the whole point of dial-out vs the old spawn model.
+
+**Copy-URL resolution at stream time** (`node-streamer-proxy/src/routes/stream.js`, `buildInitPayload`)
+- `host = hostId ? storage.getHostForUser(user, hostId) : storage.getHostByMachineIdForUser(user, urlParams.machineid)` — machineId-only links resolve here.
+- Picker: explicit `streamer_id` → `registry.get(id)`; explicit `machine_id` → `registry.pickByMachineId(id)`; neither → first available streamer anywhere (open pool fallback, only when the link didn't request a specific target).
+- **Hard-fail is implemented as specified**: if a `machine`- or `streamer`-targeted pick comes back unavailable, the client gets `DebugLog: { message: 'Machine "<id>" is unavailable', ty: "Retryable" }` and the socket closes — no silent fallback to another box. This matches the "hard-fail rather than silently sending them elsewhere" requirement exactly.
+
+**Frontend** (`web/stream.ts`, diffed `3171858..5ac31a7`)
+- New `machineid` query param, read alongside `hostId`. Entry guard changed from `if (!hostIdStr || ...)` to `if ((!hostIdStr && !machineIdStr) || ...)` — a link needs *either* id, not both.
+- `hostId` is now allowed to be `NaN`/absent; `JSON.stringify` emits `null`, and `buildInitPayload` on the Node side treats `null host_id` as "resolve by machineid instead."
+- `web/component/game/index.ts` still only builds `hostId=`/`appId=` links (the existing per-user host-list button) — it has **not** been changed to emit `machineid=` links. The machineid param is consumed on the receiving end but nothing in `web/` yet produces one. That production side is meant to come from Sunshine's own page, not the web Control Panel.
+
+**machineId capture on the host record** (`node-streamer-proxy/src/routes/hosts.js`)
+- Auto-capture is *planned but not wired* at pairing time — `POST /pair`'s success branch only logs a reminder comment; it does not call anything to set `machineId`.
+- The actual mechanism is `POST /host/refresh-machine-info { host_id, machine_id? , streamer_id? }`: resolves a live streamer conn (by given machine_id or streamer_id), calls `conn.request("GetMachineInfo", {})`, expects back `{ machineid }`, and patches `storage.patchHost(host.id, { machineId })`. This is a manual, one-time operator action per host today — "pair, then call refresh-machine-info once the streamer is dialed in" — not automatic.
+- Consequence: a host paired before this flow existed, or before its streamer has ever dialed in, has `machineId = undefined`, and a machineid-only Copy-URL link for it 404s with `HostNotFound`.
+
+### Still open / not yet built
+
+1. **Sunshine C++ side is untouched.** Nothing in the pulled diff touches a Sunshine repo (that's a separate repo — see the failed clone attempt above, PAT lacked repo access, needs re-scoping/regenerating). The "Copy URL" button next to each app on Sunshine's own apps page does not exist yet. Everything found above is the *receiving* infrastructure (Node resolves machineid → host → picks a streamer); nothing yet *produces* a `machineid=` link from inside Sunshine.
+2. **How Sunshine's button would learn its own machineId** is still open, but the answer is now well-defined by what exists: the streamer already exposes `GetMachineInfo` over its Node-facing request channel and presumably has the same hostname-derived value available locally (it's what it registers with in `streamer-endpoint.js`). Sunshine reading that value means either (a) a local IPC/HTTP call from Sunshine to the co-located streamer process, or (b) both reading the same on-disk value the streamer already computes (`streamer.toml`-adjacent). No new "how is machineId computed" logic is needed — it already exists once, in the streamer.
+3. **`web/component/game/index.ts` doesn't build `machineid=` links.** If a machineid-based Copy-URL button is also wanted somewhere in the web Control Panel (not just Sunshine), `getStreamUrl()` needs a variant that emits `machineid=` instead of `hostId=` — that's a small, mechanical follow-up once a host's `machineId` is known client-side (currently `publicHost()` in `hosts.js` doesn't even return `machineId` to the frontend — only `host_id`, `address`, `http_port`, `owner`, `paired`).
+4. **`refresh-machine-info` is manual.** If distribution to many self-hosted users is the goal, this one-time-per-host manual step is a rough edge — auto-calling it right after a streamer's first successful register (matching by owner+pending-host, or by address) would remove an operator step, but isn't built.
+5. **Dev-mode streamer auth** (`streamer_gateway.token` unset → any streamer accepted) needs a real token before this is exposed beyond localhost/trusted networks.
