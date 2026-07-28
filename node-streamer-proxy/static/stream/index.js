@@ -79,6 +79,26 @@ function isFirefox() {
 }
 const WEBRTC_CONNECT_TIMEOUT_MS = 15000;
 const FALLBACK_RECONNECT_DELAY_MS = 500;
+// ── add these two functions here ──
+function describeTerminationCode(code) {
+    switch (code) {
+        case 0: return "The stream ended.";
+        case -100: return "No video was received from the host (check the host's network or firewall).";
+        case -101: return "The host stopped sending video.";
+        case -102: return "The stream ended unexpectedly — the host app closed or the host went offline.";
+        case -103: return "The stream stopped because protected (DRM) content was displayed.";
+        case -104: return "A video processing error occurred on the host.";
+        default: return `The stream stopped (code ${code}).`;
+    }
+}
+function describeShutdown(reason) {
+    switch (reason) {
+        case "disconnect": return "The stream ended.";
+        case "failed": return "Connection to the host was lost — it may have gone offline or the network dropped.";
+        case "failednoconnect": return "Couldn't reach the host. It may be offline or unreachable.";
+        default: return "The stream stopped unexpectedly.";
+    }
+}
 export class Stream {
     reconnect() {
         // Cancel any pending retry/countdown — we're attempting now.
@@ -306,8 +326,9 @@ export class Stream {
             this.debugLog(`Permissions: ${JSON.stringify(this.permissions)}`);
             const desiredTransport = (_a = this.transportOverride) !== null && _a !== void 0 ? _a : this.settings.dataTransport;
             this.debugLog(`Using transport: ${desiredTransport}`);
+            let shutdownReason;
             if (desiredTransport == "auto") {
-                let shutdownReason = yield this.tryWebRTCTransport();
+                shutdownReason = yield this.tryWebRTCTransport();
                 if (shutdownReason == "failednoconnect") {
                     this.debugLog("Failed to establish WebRTC connection. Falling back to Web Socket transport.", { type: "ifErrorDescription" });
                     yield this.restartWithFreshTransportFallback("websocket");
@@ -315,12 +336,13 @@ export class Stream {
                 }
             }
             else if (desiredTransport == "webrtc") {
-                yield this.tryWebRTCTransport();
+                shutdownReason = yield this.tryWebRTCTransport();
             }
             else if (desiredTransport == "websocket") {
-                yield this.tryWebSocketTransport();
+                shutdownReason = yield this.tryWebSocketTransport();
             }
-            this.debugLog("Tried all configured transport options but no connection was possible", { type: "fatal" });
+            // Reaching here means a transport promise resolved — the session has ended.
+            this.debugLog(describeShutdown(shutdownReason), { type: "fatal" });
         });
     }
     createControlWebSocket() {
@@ -574,6 +596,7 @@ export class Stream {
             });
         });
     }
+    // private async tryWebSocketTransport() {
     tryWebSocketTransport() {
         return __awaiter(this, void 0, void 0, function* () {
             if (!this.permissions.allow_transport_websockets) {

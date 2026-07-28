@@ -12,6 +12,7 @@ import { apiGetAppImage, apiHostCancel } from "../../api.js";
 import { getCurrentLanguage, getTranslations } from "../../i18n.js";
 import { setContextMenu } from "../context_menu.js";
 import { showMessage } from "../modal/index.js";
+import { showNotification } from "../notification.js";
 import { APP_NO_IMAGE } from "../../resources/index.js";
 import { buildUrl } from "../../config_.js";
 export class Game {
@@ -110,7 +111,25 @@ export class Game {
             }
         });
     }
-    startStream() {
+    /*     private startStream() {
+            const query = new URLSearchParams({
+                hostId: this.getHostId(),
+                appId: this.getAppId(),
+            } as any)
+            const demoParam = new URLSearchParams(location.search).get("demoParam")
+            if (demoParam != null) {
+                query.set("demoParam", demoParam)
+            }
+    
+            if (window.matchMedia('(display-mode: standalone)').matches) {
+                // If we're in a pwa: open in the current tab
+                // If we don't do this we might get a url bar at the top
+                window.location.href = buildUrl(`/stream.html?${query}`)
+            } else {
+                window.open(buildUrl(`/stream.html?${query}`), "_blank")
+            }
+        } */
+    getStreamUrl() {
         const query = new URLSearchParams({
             hostId: this.getHostId(),
             appId: this.getAppId(),
@@ -119,14 +138,28 @@ export class Game {
         if (demoParam != null) {
             query.set("demoParam", demoParam);
         }
+        return buildUrl(`/stream.html?${query}`);
+    }
+    startStream() {
+        const url = this.getStreamUrl();
         if (window.matchMedia('(display-mode: standalone)').matches) {
-            // If we're in a pwa: open in the current tab
-            // If we don't do this we might get a url bar at the top
-            window.location.href = buildUrl(`/stream.html?${query}`);
+            window.location.href = url;
         }
         else {
-            window.open(buildUrl(`/stream.html?${query}`), "_blank");
+            window.open(url, "_blank");
         }
+    }
+    copyStreamUrl() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const url = this.getStreamUrl();
+            try {
+                yield navigator.clipboard.writeText(url);
+                showNotification("Stream link copied to clipboard", "info");
+            }
+            catch (e) {
+                yield showMessage(url);
+            }
+        });
     }
     onContextMenu(event) {
         const i = getTranslations(getCurrentLanguage()).game;
@@ -141,6 +174,12 @@ export class Game {
                 this.startStream();
                 const event = new ComponentEvent("ml-gamereload", this);
                 this.divElement.dispatchEvent(event);
+            })
+        });
+        elements.push({
+            name: "Copy URL",
+            callback: () => __awaiter(this, void 0, void 0, function* () {
+                yield this.copyStreamUrl();
             })
         });
         setContextMenu(event, {
