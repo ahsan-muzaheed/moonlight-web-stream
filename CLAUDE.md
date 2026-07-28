@@ -659,3 +659,87 @@ remaining piece is the Sunshine-fork C++ button, deferred until the user shares 
 its real open question is that Sunshine doesn't know its signaling `host_id`, so decide with the
 user how the button obtains it (or keep Copy-URL in the web UI where hostId is already known).
 
+
+
+## 
+
+
+A "Copy URL" button, placed on Sunshine's own Apps page, that copies a link.
+Anyone who pastes that link gets the moonlight-web-stream frontend, which
+streams **that exact app** from **that exact machine** (the one whose
+Sunshine the button was on) — no login, no menu navigation, no picking a
+host. This matters because the user distributes the streamer+Sunshine bundle
+to many people, each running it on their own machine, and each needs to be
+able to generate a working share-link for their own box without any central
+setup.
+
+**Link shape:** `https://<domain>/stream.html?appId=<id>&machineid=<id>`
+
+---
+
+## 1. Two repositories, two languages, one feature
+
+| Repo | Language | Role | GitHub |
+|---|---|---|---|
+| moonlight-web-stream | Rust (streamer + signaling server) + TypeScript (frontend) | Browser <-> signaling <-> streamer <-> Sunshine relay | github.com/ahsan-muzaheed/moonlight-web-stream, branch ahsan4-ws-ss---streamer |
+| Sunshine | C++ | The GameStream host, forked by the user | github.com/eagle3dstreaming/Sunshine, branch AHSAN1 |
+
+**Local paths on the user's machines** (from their messages):
+- `C:\0.sunshine\moonlight-web-stream\` — signaling server + frontend (machine 1, static IP, Node only)
+- `C:\0.sunshine\Sunshine\` — Sunshine build (co-located with a streamer on machine 2/3, per Sunshine box)
+- A third, STALE tree also exists at `C:\Users\e3ds\Desktop\moonlight-web-stream\` — this is a DIFFERENT, older architecture (a Rust-only `server/` binary, not the Node signaling server). **Ignore this tree.** It is not what's being run. Its presence in a leftover `config.json` `"path2"` key caused early confusion but is otherwise inert (the code never reads `path2`).
+
+--
+
+## 2. CORRECTING THE OLD CLAUDE.md — verified architecture
+
+An earlier CLAUDE.md (written before the repo was actually cloned/inspected)
+described a **different, wrong architecture**: Node.js signaling server with
+dial-out streamer registry, `machine_id`/`streamer_id`, etc. That guess
+turned out to be **directionally right** but was reconstructed blind. This
+session cloned both real repos and built the ACTUAL feature against the real
+code. Trust this file, not that one, for file/line specifics.
+
+**Confirmed real architecture (verified by cloning, this session):**
+- Signaling server: **Node.js/Express**, folder `node-streamer-proxy/`, entry `src/index.js`.
+- Streamer: **Rust**, folder `streamer/`, **dial-out over WebSocket** to the
+  signaling server's `/api/streamer/connect` (confirmed: `config.json` has
+  `"streamer": { "use_connected": true }`, and Node logs
+  `[StreamerGW] incoming streamer connection from <ip>`).
+- Frontend: **TypeScript**, folder `web/`, compiled via Vite/tsc into
+  `node-streamer-proxy/static/`.
+- Existing (pre-session) shareable link scheme: `stream.html?hostId=<id>&appId=<id>`
+  — this ALREADY existed and already worked before this session. The
+  Copy-URL feature extends it with an alternative, `machineid=`, that needs
+  no `hostId` at all.
+
+---
+
+## 3. Core concepts — do not conflate these terms
+
+- **`hostId`** — Node's own bookkeeping id for a *paired* Sunshine
+  (`storage.json` -> `hosts.<id>`). Holds `address`, `httpPort`, `ownerId`,
+  and `pairInfo` (the 3 PEM certs from the GameStream pairing handshake).
+  Sunshine has NO WAY to know its own hostId — it's assigned by Node, per
+  user account, at pairing time. This is exactly why the Copy-URL button
+  living on Sunshine's OWN page cannot embed `hostId` — it must use
+  `machineid` instead.
+- **`machineId`** — a NEW field this session added onto a host record
+  (`hosts.<id>.machineId`). It's the **stable, sanitized hostname** of the
+  physical box running that Sunshine + its streamer. Same value on both
+  sides (streamer computes it in Rust, Sunshine computes it in C++, using
+  IDENTICAL sanitize rules — see section 5). This is what Copy-URL links
+  carry. **A host record has no `machineId` until you explicitly link it**
+  (section 7) — it is NOT set automatically by pairing.
+- **`streamerId`** — the Rust streamer's OWN per-process registration id in
+  the Node registry = `<machineId>-<pid>`. Changes every restart. Multiple
+  streamers can run on one machine (rare) — they'd share one `machineId` but
+  have different `streamerId`s. The registry can be asked "any available
+  streamer for this machineId" (`pickByMachineId`).
+- **`appId`** — the REAL numeric GameStream app id (CRC32-derived,
+  `calculate_app_id()` in Sunshine's `process.cpp`). This is what `/applist`
+  reports as `<ID>` and what Node parses. **It is NOT the array index** shown
+  in Sunshine's Apps page Vue component — that was a real bug found and
+  fixed this session (section 6).
+
+---
