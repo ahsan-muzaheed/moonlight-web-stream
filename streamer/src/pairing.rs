@@ -65,6 +65,12 @@ fn save(
         server_certificate: pem::encode(&server.to_pem()),
     };
     let text = serde_json::to_string_pretty(&stored).map_err(|e| e.to_string())?;
+	
+	if let Some(parent) = Path::new(path).parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+	
+	
     fs::write(path, text).map_err(|e| e.to_string())
 }
 
