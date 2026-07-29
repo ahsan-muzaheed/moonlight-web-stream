@@ -102,19 +102,30 @@ async fn main() {
 	 
 	let transport_cfg = transport_config::TransportConfig::load();
 	let (mut ipc_sender, mut ipc_receiver) = match transport_cfg.transport {
-		transport_config::TransportMode::Stdio => {
-			create_process_ipc::<ServerIpcMessage, StreamerIpcMessage>(span.clone(), stdin(), stdout()).await
-		}
-		transport_config::TransportMode::Websocket => {
-			match ws_transport::connect_websocket_ipc(span.clone(), &transport_cfg).await {
-				Ok(pair) => pair,
-				Err(err) => {
-					eprintln!("[transport] websocket connect failed: {err}");
-					exit(1);
-				}
-			}
-		}
-	};
+    transport_config::TransportMode::Stdio => {
+        create_process_ipc::<ServerIpcMessage, StreamerIpcMessage>(span.clone(), stdin(), stdout()).await
+    }
+    transport_config::TransportMode::Websocket => {
+        let url = transport_cfg
+            .server_url
+            .clone()
+            .unwrap_or_else(|| "<no server_url set>".to_string());
+        let retry_secs = transport_cfg.reconnect_interval_secs;
+
+        let mut attempt: u32 = 1;
+        loop {
+            eprintln!("[transport] connecting to {url} (attempt {attempt})...");
+            match ws_transport::connect_websocket_ipc(span.clone(), &transport_cfg).await {
+                Ok(pair) => break pair,
+                Err(err) => {
+                    eprintln!("[transport] connect failed: {err} - retrying in {retry_secs}s");
+                    sleep(std::time::Duration::from_secs(retry_secs)).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+   };
 	//////////////////
 	
    
