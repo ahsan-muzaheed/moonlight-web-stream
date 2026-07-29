@@ -198,6 +198,38 @@ impl TransportConfig {
                             path.display(),
                             cfg.transport
                         );
+                        // Printed here (not via tracing::info!) so it's guaranteed to
+                        // show up on every startup regardless of log level / whether
+                        // the tracing subscriber has even been initialized yet - this
+                        // runs before that. Pairing itself only happens lazily, on the
+                        // first Init or GetAppList (see main.rs / ws_transport.rs), so
+                        // without this the operator has no way to tell "not paired
+                        // yet" apart from "paired, just hasn't been asked to stream".
+                        match cfg.pairing_pin.as_deref() {
+                            Some(pin) => {
+                                let masked: String = "*".repeat(pin.len());
+                                eprintln!(
+                                    "[pairing] self-pairing ENABLED - pin={masked} device_name={} file={}",
+                                    cfg.machine_id, cfg.pairing_file
+                                );
+                                if PathBuf::from(&cfg.pairing_file).exists() {
+                                    eprintln!(
+                                        "[pairing] status: PAIRED - cached identity found at '{}'",
+                                        cfg.pairing_file
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "[pairing] status: NOT PAIRED YET - no cached identity at '{}'. Will run the pairing handshake with Sunshine on the first GetAppList request or stream Init.",
+                                        cfg.pairing_file
+                                    );
+                                }
+                            }
+                            None => {
+                                eprintln!(
+                                    "[pairing] self-pairing DISABLED (no pairing_pin set in config) - certs must arrive from Node's Init message"
+                                );
+                            }
+                        }
                         return cfg;
                     }
                     Err(err) => {

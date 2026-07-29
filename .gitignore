@@ -32,3 +32,4 @@ web-server.exe
 *.pdb
 node-streamer-proxy/package-lock.json
 /dist
+*.lock

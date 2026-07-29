@@ -19,5 +19,5 @@ sunshine_http_port = 47989
 
 
 # NEW - self-pairing
-pairing_pin  = "123445678"
+pairing_pin  = "1234"
 pairing_file = "C:\\ProgramData\\e3ds\\pairing.json"

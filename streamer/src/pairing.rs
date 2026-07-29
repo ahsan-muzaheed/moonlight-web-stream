@@ -84,38 +84,75 @@ pub async fn ensure_paired(
 ) -> Result<(), String> {
     // -- Fast path: we've paired before.
     if let Some((ident, secret, server)) = load(pairing_file) {
-        info!("[pairing] loaded cached identity from {pairing_file}");
+        info!("[pairing] status=PAIRED source=cache file='{pairing_file}' - applying cached identity");
         return host
             .set_identity(ident, secret, server)
             .await
-            .map_err(|e| format!("failed to apply cached identity: {e:?}"));
+            .map_err(|e| {
+                let msg = format!("failed to apply cached identity: {e:?}");
+                warn!("[pairing] status=ERROR - {msg}");
+                msg
+            })
+            .inspect(|_| info!("[pairing] status=READY - cached identity applied, host authenticated"));
     }
 
     // -- First run: generate an identity and pair.
-    info!("[pairing] no cached identity, pairing with Sunshine as '{device_name}'");
+    // The crate's pair() call below is a single opaque async call covering
+    // all 5 GameStream handshake phases internally - it does not expose
+    // per-phase hooks, so this is the finest-grained trail we can log
+    // without forking moonlight-common-rust. What we CAN show clearly:
+    // which step we're on, what target/PIN/name are in play, and exactly
+    // where in the sequence a failure happened.
+    let target = host.address().to_string();
+    info!(
+        "[pairing] status=NOT_PAIRED target={target} device_name='{device_name}' pin={} file='{pairing_file}' - starting pairing",
+        "*".repeat(pin.len())
+    );
 
-    let pin = parse_pin(pin).ok_or_else(|| "pairing_pin must be exactly 4 digits".to_string())?;
+    let pin = parse_pin(pin).ok_or_else(|| {
+        let msg = "pairing_pin must be exactly 4 digits".to_string();
+        warn!("[pairing] status=ERROR step=validate_pin - {msg}");
+        msg
+    })?;
 
+    info!("[pairing] step=1/3 generating local client identity (cert + key)...");
     let crypto = OpenSSLCryptoBackend;
-    let (ident, secret) = crypto
-        .generate_client_identity()
-        .map_err(|e| format!("failed to generate client identity: {e:?}"))?;
+    let (ident, secret) = crypto.generate_client_identity().map_err(|e| {
+        let msg = format!("failed to generate client identity: {e:?}");
+        warn!("[pairing] status=ERROR step=1/3 - {msg}");
+        msg
+    })?;
+    info!("[pairing] step=1/3 done");
 
+    info!(
+        "[pairing] step=2/3 running GameStream handshake against {target} (this blocks until Sunshine accepts or rejects the PIN)..."
+    );
     host.pair(&ident, &secret, device_name.to_string(), pin, crypto)
         .await
-        .map_err(|e| format!("pairing failed: {e:?}"))?;
+        .map_err(|e| {
+            let msg = format!("pairing failed: {e:?}");
+            warn!(
+                "[pairing] status=ERROR step=2/3 - {msg}. Most likely cause: pairing_pin in \
+                 streamer.toml does not match auto_pair_pin in sunshine.conf on {target}, or \
+                 Sunshine is unreachable."
+            );
+            msg
+        })?;
+    info!("[pairing] step=2/3 done - handshake accepted");
 
     // pair() stores the identity itself on success; read it back out to cache.
-    let (ident, secret, server) = host
-        .identity()
-        .await
-        .ok_or_else(|| "paired but no identity present".to_string())?;
+    let (ident, secret, server) = host.identity().await.ok_or_else(|| {
+        let msg = "paired but no identity present".to_string();
+        warn!("[pairing] status=ERROR step=3/3 - {msg}");
+        msg
+    })?;
 
+    info!("[pairing] step=3/3 caching credentials to '{pairing_file}'...");
     if let Err(err) = save(pairing_file, &ident, &secret, &server) {
         // Not fatal: we're paired for this run, we'll just re-pair next boot.
-        warn!("[pairing] paired but failed to cache to {pairing_file}: {err}");
+        warn!("[pairing] step=3/3 FAILED to cache to '{pairing_file}': {err} - will re-pair on next restart");
     } else {
-        info!("[pairing] paired and cached to {pairing_file}");
+        info!("[pairing] step=3/3 done - status=PAIRED, streamer is now paired with Sunshine");
     }
 
     Ok(())
