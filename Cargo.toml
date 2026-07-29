@@ -76,6 +76,9 @@ num = "0.4"
 num-derive = "0.4"
 num-traits = "0.2"
 
+# Windows-only (fatal-error message boxes, console attach/detach)
+windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
+
 [workspace.lints.clippy]
 too_many_arguments = "allow"
 unwrap_used = "warn"
@@ -122,7 +125,7 @@ hex.workspace = true
 sha2 = "0.10.9"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_System_Console"] }
+windows-sys = { version = "0.61.2", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
 
 [lints]
 workspace = true

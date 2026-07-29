@@ -25,6 +25,42 @@ use std::{env, fs, path::PathBuf};
 
 use serde::Deserialize;
 
+/// Report a fatal config error and exit. Always prints to stderr; on Windows
+/// also pops a native message box.
+///
+/// Why: streamer.exe is a console-subsystem app. Run from an already-open
+/// terminal, stderr is enough - the prompt just sits there after exit. But
+/// double-clicked from Explorer (or launched by a scheduled task / another
+/// process with no attached console), Windows opens its own console window
+/// that closes itself the instant the process exits - a fast eprintln! +
+/// exit(1) means the operator never gets to read it. A message box has no
+/// such dependency: it stays up until someone clicks OK, regardless of how
+/// the process was launched.
+fn fatal_config_error(message: &str) -> ! {
+    eprintln!("[pairing] ERROR: {message}");
+
+    #[cfg(windows)]
+    {
+        use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+
+        let wide_text: Vec<u16> = OsStr::new(message).encode_wide().chain(std::iter::once(0)).collect();
+        let wide_caption: Vec<u16> = OsStr::new("Streamer - Configuration Error")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // SAFETY: both buffers are valid, null-terminated UTF-16 for the
+        // duration of this call; hwnd=null makes it an owner-less top-level
+        // dialog. Blocks until the operator clicks OK.
+        unsafe {
+            MessageBoxW(std::ptr::null_mut(), wide_text.as_ptr(), wide_caption.as_ptr(), MB_OK | MB_ICONERROR);
+        }
+    }
+
+    std::process::exit(1);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TransportMode {
@@ -208,6 +244,22 @@ impl TransportConfig {
                         match cfg.pairing_pin.as_deref() {
                             Some(pin) => {
                                 let masked: String = "*".repeat(pin.len());
+
+                                // GameStream PINs are always exactly 4 numeric digits -
+                                // Sunshine's own /pin endpoint enforces the same rule.
+                                // Checked here, at config load, so a typo in
+                                // pairing_pin fails immediately and clearly instead of
+                                // connecting, waiting on Node/Sunshine, and only then
+                                // crashing deep inside the pairing handshake.
+                                let pin_ok = pin.len() == 4 && pin.chars().all(|c| c.is_ascii_digit());
+                                if !pin_ok {
+                                    fatal_config_error(&format!(
+                                        "pairing_pin in {} is invalid - must be exactly 4 digits, got '{masked}' ({} chars). Fix streamer.toml (and the matching auto_pair_pin in sunshine.conf) and restart.",
+                                        path.display(),
+                                        pin.len()
+                                    ));
+                                }
+
                                 eprintln!(
                                     "[pairing] self-pairing ENABLED - pin={masked} device_name={} file={}",
                                     cfg.machine_id, cfg.pairing_file

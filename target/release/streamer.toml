@@ -17,7 +17,6 @@ app_directory = "z:\\0.apps"
 sunshine_address   = "127.0.0.1"
 sunshine_http_port = 47989
 
-
 # NEW - self-pairing
 pairing_pin  = "1234"
 pairing_file = "C:\\ProgramData\\e3ds\\pairing.json"
