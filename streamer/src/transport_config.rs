@@ -87,6 +87,16 @@ pub struct TransportConfig {
     /// falls back to app-id launching. Example: "z:\\0.apps".
     #[serde(default)]
     pub app_directory: Option<String>,
+	
+	/// Fixed PIN shared with Sunshine's `auto_pair_pin` in sunshine.conf.
+    /// When set, the streamer pairs itself on first run and ignores the certs
+    /// Node sends in Init. When unset, old behaviour (Node owns pairing).
+    #[serde(default)]
+    pub pairing_pin: Option<String>,
+
+    /// Where the 3 PEMs are cached after a successful pair.
+    #[serde(default = "default_pairing_file")]
+    pub pairing_file: String,
 }
 
 // fn default_streamer_id() -> String {
@@ -148,6 +158,10 @@ fn default_sunshine_http_port() -> u16 {
     47989
 }
 
+fn default_pairing_file() -> String {
+    "pairing.json".to_string()
+}
+
 impl Default for TransportConfig {
     fn default() -> Self {
         TransportConfig {
@@ -159,6 +173,8 @@ impl Default for TransportConfig {
             sunshine_address: default_sunshine_address(),
             sunshine_http_port: default_sunshine_http_port(),
             app_directory: None,
+			pairing_pin: None,
+            pairing_file: default_pairing_file(),
         }
     }
 }

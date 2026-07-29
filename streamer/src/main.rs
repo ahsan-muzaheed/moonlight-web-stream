@@ -81,6 +81,8 @@ mod video;
 mod transport_config; // NEW
 mod ws_transport;     // NEW
 mod app_path;
+mod pairing;          // NEW
+
 #[tokio::main]
 async fn main() {
     let default_panic = panic::take_hook();
@@ -232,13 +234,39 @@ async fn main() {
     let host = MoonlightHost::new(host_address, host_http_port, client_unique_id)
         .expect("failed to create host");
 
-    host.set_identity(
+/*     host.set_identity(
         ClientIdentifier::from_pem(client_certificate),
         ClientSecret::from_pem(client_private_key),
         ServerIdentifier::from_pem(server_certificate),
     )
     .await
-    .expect("failed to set pairing info");
+    .expect("failed to set pairing info"); */
+	
+	
+	match transport_cfg.pairing_pin.as_deref() {
+        // NEW: self-pairing. Node's certs (if any) are ignored.
+        Some(pin) => {
+            pairing::ensure_paired(
+                &host,
+                pin,
+                &transport_cfg.pairing_file,
+                &transport_cfg.machine_id,
+            )
+            .await
+            .expect("failed to self-pair with Sunshine");
+        }
+        // OLD: certs pushed in over IPC by Node.
+        None => {
+            host.set_identity(
+                ClientIdentifier::from_pem(client_certificate),
+                ClientSecret::from_pem(client_private_key),
+                ServerIdentifier::from_pem(server_certificate),
+            )
+            .await
+            .expect("failed to set pairing info");
+        }
+    }
+	
 
     // -- Configure moonlight
     let moonlight = MoonlightInstance::global().expect("failed to find moonlight");

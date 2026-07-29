@@ -327,13 +327,31 @@ async fn get_app_list(
         MoonlightHost::new(address.to_string(), http_port, Some(client_unique_id))
             .map_err(|err| format!("failed to create host: {err:?}"))?;
 
-    host.set_identity(
+/*     host.set_identity(
         ClientIdentifier::from_pem(client_certificate),
         ClientSecret::from_pem(client_private_key),
         ServerIdentifier::from_pem(server_certificate),
     )
     .await
-    .map_err(|err| format!("failed to set pairing info: {err:?}"))?;
+    .map_err(|err| format!("failed to set pairing info: {err:?}"))?; */
+	
+	
+	// Self-paired mode: ignore any certs in params, use our local identity.
+    match transport_cfg.pairing_pin.as_deref() {
+        Some(pin) => {
+            crate::pairing::ensure_paired(
+                &host,
+                pin,
+                &transport_cfg.pairing_file,
+                &transport_cfg.machine_id,
+            )
+            .await?;
+        }
+        None => {
+            // existing parse_pem + set_identity code stays here unchanged
+        }
+    }
+	
 
     let apps = host
         .app_list()
