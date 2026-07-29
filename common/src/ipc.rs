@@ -33,9 +33,14 @@ pub enum ServerIpcMessage {
         host_address: String,
         host_http_port: u16,
         client_unique_id: Option<String>,
-        client_private_key: Pem,
-        client_certificate: Pem,
-        server_certificate: Pem,
+        // Only needed for the old Node-driven pairing path. Absent/omitted
+        // when the streamer self-pairs with Sunshine using a config PIN.
+        #[serde(default)]
+        client_private_key: Option<Pem>,
+        #[serde(default)]
+        client_certificate: Option<Pem>,
+        #[serde(default)]
+        server_certificate: Option<Pem>,
         app_id: u32,
         //demo_param: Option<String>,
         video_frame_queue_size: usize,

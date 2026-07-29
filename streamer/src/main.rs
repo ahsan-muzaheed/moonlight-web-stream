@@ -257,17 +257,37 @@ async fn main() {
 	match transport_cfg.pairing_pin.as_deref() {
         // NEW: self-pairing. Node's certs (if any) are ignored.
         Some(pin) => {
-            pairing::ensure_paired(
+            if let Err(err) = pairing::ensure_paired(
                 &host,
                 pin,
                 &transport_cfg.pairing_file,
                 &transport_cfg.machine_id,
             )
             .await
-            .expect("failed to self-pair with Sunshine");
+            {
+                warn!("[pairing] giving up: {err}");
+                ipc_sender
+                    .send(StreamerIpcMessage::WebSocket(StreamServerMessage::DebugLog {
+                        message: err,
+                        ty: Some(LogMessageType::InformError),
+                    }))
+                    .await;
+                exit(1);
+            }
         }
-        // OLD: certs pushed in over IPC by Node.
+        // OLD: certs pushed in over IPC by Node. Node no longer sends these
+        // once self-pairing is on everywhere, so this only still works if
+        // pairing_pin is left unset AND Node is still configured to supply
+        // real certs.
         None => {
+            let (Some(client_certificate), Some(client_private_key), Some(server_certificate)) =
+                (client_certificate, client_private_key, server_certificate)
+            else {
+                panic!(
+                    "no pairing_pin configured and Node sent no pairing certificates - \
+                     set pairing_pin in streamer.toml to self-pair, or have Node supply certs"
+                );
+            };
             host.set_identity(
                 ClientIdentifier::from_pem(client_certificate),
                 ClientSecret::from_pem(client_private_key),

@@ -5,19 +5,43 @@
 // from config, and caches the resulting 3 PEMs on disk. Every run after that
 // it just loads the cache. Node is not involved either way.
 
-use std::{fs, path::Path};
+use std::{fs, path::Path, time::Duration};
 
 use moonlight_common::{
     crypto::openssl::OpenSSLCryptoBackend,
-    high::tokio::MoonlightHost,
+    high::{MoonlightClientError, tokio::MoonlightHost},
     http::{
         ClientIdentifier, ClientSecret, ServerIdentifier,
-        client::tokio_hyper::TokioHyperClient,
+        client::{
+            RequestError,
+            tokio_hyper::{HyperError, TokioHyperClient},
+        },
         pair::{PairPin, PairingCryptoBackend},
     },
 };
 use serde::{Deserialize, Serialize};
+use tokio::time::sleep;
 use tracing::{info, warn};
+
+/// How many times to retry reaching Sunshine on the cached-identity fast
+/// path before giving up on this stream attempt. Covers the case where the
+/// streamer and Sunshine both launch around boot and Sunshine just isn't
+/// listening yet.
+const SUNSHINE_RETRY_ATTEMPTS: u32 = 10;
+const SUNSHINE_RETRY_INTERVAL_SECS: u64 = 2;
+
+/// True if `err` means Sunshine simply isn't reachable (connection refused /
+/// timed out) as opposed to a real pairing/cert/protocol problem worth
+/// surfacing immediately instead of retrying.
+fn is_offline(err: &MoonlightClientError) -> bool {
+    match err {
+        MoonlightClientError::Backend(inner) => inner
+            .downcast_ref::<HyperError>()
+            .map(|e| e.is_connect())
+            .unwrap_or(false),
+        _ => false,
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct StoredIdentity {
@@ -85,15 +109,44 @@ pub async fn ensure_paired(
     // -- Fast path: we've paired before.
     if let Some((ident, secret, server)) = load(pairing_file) {
         info!("[pairing] status=PAIRED source=cache file='{pairing_file}' - applying cached identity");
-        return host
-            .set_identity(ident, secret, server)
-            .await
-            .map_err(|e| {
-                let msg = format!("failed to apply cached identity: {e:?}");
-                warn!("[pairing] status=ERROR - {msg}");
-                msg
-            })
-            .inspect(|_| info!("[pairing] status=READY - cached identity applied, host authenticated"));
+
+        let target = host.address().to_string();
+        let mut attempt: u32 = 1;
+
+        loop {
+            match host
+                .set_identity(ident.clone(), secret.clone(), server.clone())
+                .await
+            {
+                Ok(()) => {
+                    info!("[pairing] status=READY - cached identity applied, host authenticated");
+                    return Ok(());
+                }
+                Err(err) if is_offline(&err) && attempt < SUNSHINE_RETRY_ATTEMPTS => {
+                    warn!(
+                        "[pairing] status=RETRYING attempt={attempt}/{SUNSHINE_RETRY_ATTEMPTS} \
+                         target={target} - Sunshine is not reachable yet, retrying in \
+                         {SUNSHINE_RETRY_INTERVAL_SECS}s..."
+                    );
+                    sleep(Duration::from_secs(SUNSHINE_RETRY_INTERVAL_SECS)).await;
+                    attempt += 1;
+                }
+                Err(err) if is_offline(&err) => {
+                    let waited = SUNSHINE_RETRY_ATTEMPTS as u64 * SUNSHINE_RETRY_INTERVAL_SECS;
+                    let msg = format!(
+                        "Sunshine is not running on this host ({target}) - gave up after \
+                         {waited}s"
+                    );
+                    warn!("[pairing] status=ERROR - {msg}");
+                    return Err(msg);
+                }
+                Err(err) => {
+                    let msg = format!("failed to apply cached identity: {err:?}");
+                    warn!("[pairing] status=ERROR - {msg}");
+                    return Err(msg);
+                }
+            }
+        }
     }
 
     // -- First run: generate an identity and pair.
