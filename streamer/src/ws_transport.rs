@@ -119,8 +119,14 @@ pub async fn connect_websocket_ipc(
     // util::sanitize_machine_id(get_host_name()) would report, since they run
     // on the same machine and apply the identical sanitize rule.
     let machine_id = cfg.machine_id.clone();
-	
-	
+    // Self-pairing: when a PIN is configured the streamer owns its own certs
+    // (cached in pairing_file) and ignores whatever Node sends per request.
+    // Threaded down the same way machine_id is - handle_request/get_app_list
+    // never see the whole TransportConfig.
+    let pairing_pin = cfg.pairing_pin.clone();
+    let pairing_file = cfg.pairing_file.clone();
+
+
     // Task A: WS text frames from Node -> write JSON + '\n' into ipc_read_half.
     let span_a = span.clone();
     // Cloned BEFORE the spawn: the closure takes ownership of whatever it
@@ -140,10 +146,21 @@ pub async fn connect_websocket_ipc(
 							let reply_tx = request_tx.clone();
                             let addr = sunshine_address.clone();
                             let mid = machine_id.clone();
+                            let pin = pairing_pin.clone();
+                            let pfile = pairing_file.clone();
                             let span_req = span_a.clone();
                             tokio::spawn(async move {
-                                handle_request(span_req, text, addr, sunshine_http_port, mid, reply_tx)
-                                    .await;
+                                handle_request(
+                                    span_req,
+                                    text,
+                                    addr,
+                                    sunshine_http_port,
+                                    mid,
+                                    pin,
+                                    pfile,
+                                    reply_tx,
+                                )
+                                .await;
                             });
                         }
                         continue;
@@ -249,6 +266,8 @@ async fn handle_request(
     sunshine_address: String,
     sunshine_http_port: u16,
     machine_id: String,
+    pairing_pin: Option<String>,
+    pairing_file: String,
     reply_tx: mpsc::UnboundedSender<Message>,
 ) {
     let v: serde_json::Value = match serde_json::from_str(&text) {
@@ -265,7 +284,16 @@ async fn handle_request(
 
     let result = match method {
         "GetAppList" => {
-            get_app_list(&span, &sunshine_address, sunshine_http_port, &params).await
+            get_app_list(
+                &span,
+                &sunshine_address,
+                sunshine_http_port,
+                &params,
+                pairing_pin.as_deref(),
+                &pairing_file,
+                &machine_id,
+            )
+            .await
         }
         // Copy-URL: Node asks the streamer (already dialed-out, reachable
         // regardless of any static/public IP) for its machine id, rather than
@@ -300,6 +328,9 @@ async fn get_app_list(
     address: &str,
     http_port: u16,
     params: &serde_json::Value,
+    pairing_pin: Option<&str>,
+    pairing_file: &str,
+    device_name: &str,
 ) -> Result<serde_json::Value, String> {
     let field = |name: &str| -> Result<String, String> {
         params
@@ -311,47 +342,45 @@ async fn get_app_list(
 
     let client_unique_id = field("client_unique_id")?;
 
-    // Certs arrive as raw PEM TEXT here. (Init doesn't need this step: serde
-    // decodes those fields straight into pem::Pem, see common/src/ipc.rs.)
-    let parse_pem = |name: &str, text: String| -> Result<pem::Pem, String> {
-        pem::parse(text.as_bytes()).map_err(|err| format!("GetAppList: bad '{name}' PEM: {err}"))
-    };
-
-    let client_private_key = parse_pem("client_private_key", field("client_private_key")?)?;
-    let client_certificate = parse_pem("client_certificate", field("client_certificate")?)?;
-    let server_certificate = parse_pem("server_certificate", field("server_certificate")?)?;
-
     info!(parent: span, "[ws] GetAppList -> {address}:{http_port}");
 
     let host: MoonlightHost<TokioHyperClient> =
         MoonlightHost::new(address.to_string(), http_port, Some(client_unique_id))
             .map_err(|err| format!("failed to create host: {err:?}"))?;
 
-/*     host.set_identity(
-        ClientIdentifier::from_pem(client_certificate),
-        ClientSecret::from_pem(client_private_key),
-        ServerIdentifier::from_pem(server_certificate),
-    )
-    .await
-    .map_err(|err| format!("failed to set pairing info: {err:?}"))?; */
-	
-	
-	// Self-paired mode: ignore any certs in params, use our local identity.
-    match transport_cfg.pairing_pin.as_deref() {
+    match pairing_pin {
+        // NEW: self-paired. Credentials come from our own local pairing file,
+        // so Node does not need to hold (or send) any certs at all. Whatever
+        // cert params Node may still be sending are ignored here.
         Some(pin) => {
-            crate::pairing::ensure_paired(
-                &host,
-                pin,
-                &transport_cfg.pairing_file,
-                &transport_cfg.machine_id,
-            )
-            .await?;
+            crate::pairing::ensure_paired(&host, pin, pairing_file, device_name).await?;
         }
+        // OLD: Node did the pairing and owns the certs, we merely borrow them
+        // for this call. Parsing lives inside this arm so that self-paired mode
+        // does not fail on the missing params.
         None => {
-            // existing parse_pem + set_identity code stays here unchanged
+            // Certs arrive as raw PEM TEXT here. (Init doesn't need this step:
+            // serde decodes those fields straight into pem::Pem, see
+            // common/src/ipc.rs.)
+            let parse_pem = |name: &str, text: String| -> Result<pem::Pem, String> {
+                pem::parse(text.as_bytes())
+                    .map_err(|err| format!("GetAppList: bad '{name}' PEM: {err}"))
+            };
+
+            let client_private_key = parse_pem("client_private_key", field("client_private_key")?)?;
+            let client_certificate = parse_pem("client_certificate", field("client_certificate")?)?;
+            let server_certificate = parse_pem("server_certificate", field("server_certificate")?)?;
+
+            host.set_identity(
+                ClientIdentifier::from_pem(client_certificate),
+                ClientSecret::from_pem(client_private_key),
+                ServerIdentifier::from_pem(server_certificate),
+            )
+            .await
+            .map_err(|err| format!("failed to set pairing info: {err:?}"))?;
         }
     }
-	
+
 
     let apps = host
         .app_list()
