@@ -98,23 +98,16 @@ function sanitizeUrlParams(params) {
  */
 async function fetchAppList(host, user, streamerConn) {
   if (streamerConn && typeof streamerConn.request === "function") {
-    try {
-      const apps = await streamerConn.request("GetAppList", {
-        client_unique_id: user.hostUniqueId,
-        client_private_key: toPkcs8(host.pairInfo.clientPrivateKey),
-        client_certificate: host.pairInfo.clientCertificate,
-        server_certificate: host.pairInfo.serverCertificate,
-      });
-      if (Array.isArray(apps)) {
-        console.log(`[Init] applist via streamer: ${apps.length} apps`);
-        return apps;
-      }
-      console.warn("[Init] streamer returned a bad app list, falling back");
-    } catch (err) {
-      console.warn(`[Init] applist via streamer failed (${err.message}), falling back to direct call`);
+    const apps = await streamerConn.request("GetAppList", {
+      client_unique_id: user.hostUniqueId,
+    });
+    if (Array.isArray(apps)) {
+      console.log(`[Init] applist via streamer: ${apps.length} apps`);
+      return apps;
     }
+    throw new Error("streamer returned a bad app list");
   }
-  return moonlight.listApps(host, user.hostUniqueId);
+  throw new Error(`no streamer connected for host ${host.id}`);
 }
 
 /**

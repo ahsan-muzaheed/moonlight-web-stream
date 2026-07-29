@@ -24,7 +24,6 @@ function hostRoutes(ctx) {
     address: h.address,
     http_port: h.httpPort,
     owner: h.ownerId,
-    paired: !!h.pairInfo,
   });
 
   // ---- List (streamed: cached rows first, live serverinfo as it lands) ---
@@ -129,46 +128,6 @@ function hostRoutes(ctx) {
     }
   });
 
-  // ---- Pairing (streamed: PIN first, then result) ------------------------
-
-  router.post("/pair", auth, async (req, res) => {
-    let host;
-    try {
-      host = storage.getHostForUser(req.user, req.body.host_id);
-    } catch (err) {
-      return res.status(errStatus(err)).json({ error: err.message });
-    }
-
-    const { randomPin } = require("../moonlight/crypto");
-    const pin = randomPin();
-
-    res.set("Content-Type", "application/x-ndjson");
-    // Phase 1 result: show the user the PIN to type into Sunshine.
-    res.write(JSON.stringify({ Pin: pin }) + "\n");
-
-	try {
-      const pairInfo = await moonlight.pair(host, uniqueId(req.user), pin);
-      storage.setPairInfo(host.id, pairInfo);
-
-      // Copy-URL: this host has no machineId link yet. Node can't guess
-      // which connected streamer (if any) belongs to a brand-new host - see
-      // POST /host/refresh-machine-info, which the operator calls once,
-      // naming the streamer, after it dials in. Until then, links to this
-      // host need ?hostId= (machineid-only links will 404 with HostNotFound).
-      console.log(
-        `[Pair] host ${host.id} paired. Call POST /api/host/refresh-machine-info ` +
-        "{ host_id, machine_id } once its streamer is connected to enable machineid-only Copy-URL links."
-      );
-
-      res.write(JSON.stringify({ Paired: publicHost(storage.getHost(host.id)) }) + "\n");
-    } catch (err) {
-      console.warn("[Pair] failed:", err.message);
-      res.write(JSON.stringify({ PairError: err.message }) + "\n");
-    }
-	
-    res.end();
-  });
-
   // ---- Refresh a paired host's machineId without re-pairing --------------
   // Fixes hosts paired BEFORE the auto-capture-at-pairing-time logic above
   // existed (their storage.json record has no machineId, so a Copy-URL
@@ -242,7 +201,17 @@ function hostRoutes(ctx) {
   router.get("/apps", auth, async (req, res) => {
     try {
       const host = storage.getHostForUser(req.user, req.query.host_id);
-      const apps = await moonlight.listApps(host, uniqueId(req.user));
+
+      const conn = host.machineId ? ctx.streamerRegistry.pickByMachineId(host.machineId) : null;
+      if (!conn) {
+        return res.status(409).json({
+          error: "NoStreamerConnected: this host's streamer must be online to list apps (self-pairing runs on the streamer, not Node)",
+        });
+      }
+
+      const apps = await conn.request("GetAppList", {
+        client_unique_id: uniqueId(req.user),
+      });
       res.json({ apps });
     } catch (err) {
       res.status(errStatus(err)).json({ error: err.message });

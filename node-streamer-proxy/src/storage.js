@@ -261,7 +261,6 @@ class Storage {
       address,
       httpPort,
       ownerId: num(ownerId),
-      pairInfo: null, // { clientCertificate, clientPrivateKey, serverCertificate } (PEM strings)
       cache: null, // last known serverinfo, for the "undetailed" list view
     };
     this.data.hosts[id] = host;
@@ -283,10 +282,6 @@ class Storage {
     if (id === null || !this.data.hosts[id]) throw new Error("HostNotFound");
     delete this.data.hosts[id];
     this.save();
-  }
-
-  setPairInfo(hostId, pairInfo) {
-    return this.patchHost(hostId, { pairInfo });
   }
 
   // ---- Sessions ----------------------------------------------------------

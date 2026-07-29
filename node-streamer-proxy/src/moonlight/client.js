@@ -111,19 +111,6 @@ async function serverInfo(host, uniqueId) {
   return parseXml(xml);
 }
 
-// ---- Pairing --------------------------------------------------------------
-
-/**
- * The 5-phase GameStream pairing handshake.
- *
- * The user must type `pin` into Sunshine's web UI while this runs.
- * On success, returns the PEM triple the streamer's Init payload needs.
- *
- * !! UNVERIFIED. The hash/ordering below follows moonlight-common-c, but the
- *    exact byte layout is easy to get subtly wrong. Expect to debug this. !!
- */
-const PIN_ENTRY_TIMEOUT = 120000; // 2 min for the user to type the PIN into Sunshine
-
 // Wrap a phase so raw socket errors (ECONNRESET / hang up) say WHICH phase died,
 // and log the raw XML Sunshine returned for inspection.
 async function phase(label, host, path, opts) {
@@ -135,118 +122,6 @@ async function phase(label, host, path, opts) {
     console.warn(`[Pair] ${label} transport error:`, err.message);
     throw new Error(`${label}: ${err.message}`);
   }
-}
-
-async function pair(host, uniqueId, pin) {
-  const client = c.generateClientCertificate();
-  const salt = c.randomSalt();
-  const aesKey = c.deriveAesKey(salt, pin);
-
-  // -- Phase 1: send our cert + salt, get the host's cert back.
-  const p1 = await phase(
-    "phase1-getservercert",
-    host,
-    `/pair?${query({
-      ...baseParams(uniqueId),
-      devicename: "roth",
-      updateState: 1,
-      phrase: "getservercert",
-      salt: salt.toString("hex").toUpperCase(),
-      clientcert: c.pemToHex(client.certificate),
-    })}`,
-    // Sunshine holds this request open until the PIN is entered.
-    { timeout: PIN_ENTRY_TIMEOUT }
-  );
-
-  if (p1.paired !== "1" || !p1.plaincert) {
-    throw new Error("pairing phase 1 failed (is the PIN correct?)");
-  }
-  const serverCertPem = c.hexToPem(p1.plaincert);
-
-  // -- Phase 2: client challenge (16 random bytes, AES-ECB encrypted).
-  const clientChallenge = require("crypto").randomBytes(16);
-  const p2 = await phase(
-    "phase2-clientchallenge",
-    host,
-    `/pair?${query({
-      ...baseParams(uniqueId),
-      clientchallenge: c.aesEcbEncrypt(aesKey, clientChallenge).toString("hex").toUpperCase(),
-    })}`
-  );
-  if (p2.paired !== "1") throw new Error("pairing phase 2 failed");
-
-  // Decrypts to: serverResponse(32) || serverChallenge(16)
-  const decrypted2 = c.aesEcbDecrypt(aesKey, Buffer.from(p2.challengeresponse, "hex"));
-  const serverResponse = decrypted2.subarray(0, 32);
-  const serverChallenge = decrypted2.subarray(32, 48);
-
-  // -- Phase 3: answer the host's challenge, prove we hold the private key.
-  const clientSecret = require("crypto").randomBytes(16);
-  const clientCertSig = c.certSignature(client.certificate);
-  const challengeResponseHash = c.sha256(serverChallenge, clientCertSig, clientSecret);
-
-  const p3 = await phase(
-    "phase3-serverchallengeresp",
-    host,
-    `/pair?${query({
-      ...baseParams(uniqueId),
-      serverchallengeresp: c
-        .aesEcbEncrypt(aesKey, challengeResponseHash)
-        .toString("hex")
-        .toUpperCase(),
-    })}`
-  );
-  if (p3.paired !== "1") throw new Error("pairing phase 3 failed");
-
-  // pairingsecret = serverSecret(16) || serverSignature(256)
-  const pairingSecret = Buffer.from(p3.pairingsecret, "hex");
-  const serverSecret = pairingSecret.subarray(0, 16);
-  const serverSignature = pairingSecret.subarray(16);
-
-  // -- Phase 4 (local): verify the host actually holds its cert's key,
-  //    and that its earlier response matches the secret it just revealed.
-  if (!c.verifySignature(serverCertPem, serverSecret, serverSignature)) {
-    throw new Error("pairing failed: bad server signature (MITM?)");
-  }
-
-  const serverCertSig = c.certSignature(serverCertPem);
-  const expected = c.sha256(clientChallenge, serverCertSig, serverSecret);
-  if (!expected.equals(serverResponse)) {
-    throw new Error("pairing failed: server response mismatch (wrong PIN?)");
-  }
-
-  // -- Phase 5: hand over our secret, signed.
-  const clientPairingSecret = Buffer.concat([
-    clientSecret,
-    c.signData(client.privateKey, clientSecret),
-  ]);
-
-  const p5 = await phase(
-    "phase5-clientpairingsecret",
-    host,
-    `/pair?${query({
-      ...baseParams(uniqueId),
-      clientpairingsecret: clientPairingSecret.toString("hex").toUpperCase(),
-    })}`
-  );
-  if (p5.paired !== "1") throw new Error("pairing phase 5 failed");
-
-  // -- Phase 6: confirm over TLS with our new client cert.
-  const pairInfo = {
-    clientCertificate: client.certificate,
-    clientPrivateKey: client.privateKey,
-    serverCertificate: serverCertPem,
-  };
-
-  const p6 = await phase(
-    "phase6-pairchallenge-tls",
-    host,
-    `/pair?${query({ ...baseParams(uniqueId), phrase: "pairchallenge" })}`,
-    { pairInfo }
-  );
-  if (p6.paired !== "1") throw new Error("pairing phase 6 (TLS challenge) failed");
-
-  return pairInfo;
 }
 
 /**
@@ -311,7 +186,6 @@ async function appImage(host, uniqueId, appId) {
 
 module.exports = {
   serverInfo,
-  pair,
   unpair,
   cancelApp,
   listApps,
