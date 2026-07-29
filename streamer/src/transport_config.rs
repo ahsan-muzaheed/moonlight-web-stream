@@ -131,8 +131,13 @@ pub struct TransportConfig {
     pub pairing_pin: Option<String>,
 
     /// Where the 3 PEMs are cached after a successful pair.
-    #[serde(default = "default_pairing_file")]
+   #[serde(default = "default_pairing_file")]
     pub pairing_file: String,
+
+    /// Seconds between reconnect attempts when the initial websocket
+    /// connect to server_url fails (or drops later). Retries forever.
+    #[serde(default = "default_reconnect_interval_secs")]
+    pub reconnect_interval_secs: u64,
 }
 
 // fn default_streamer_id() -> String {
@@ -198,6 +203,10 @@ fn default_pairing_file() -> String {
     "pairing.json".to_string()
 }
 
+fn default_reconnect_interval_secs() -> u64 {
+    5
+}
+
 impl Default for TransportConfig {
     fn default() -> Self {
         TransportConfig {
@@ -210,7 +219,8 @@ impl Default for TransportConfig {
             sunshine_http_port: default_sunshine_http_port(),
             app_directory: None,
 			pairing_pin: None,
-            pairing_file: default_pairing_file(),
+			pairing_file: default_pairing_file(),
+            reconnect_interval_secs: default_reconnect_interval_secs(),
         }
     }
 }
