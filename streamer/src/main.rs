@@ -116,7 +116,10 @@ async fn main() {
 			loop {
 				eprintln!("[transport] connecting to {url} (attempt {attempt})...");
 				match ws_transport::connect_websocket_ipc(span.clone(), &transport_cfg).await {
-					Ok(pair) => break pair,
+					Ok(pair) => {
+					eprintln!("[transport] connected to {url}");
+					break pair;
+				}
 					Err(err) => {
 						eprintln!(
 							"[transport] connect failed: {err} - retrying in {retry_secs}s"
@@ -193,6 +196,12 @@ async fn main() {
 			url_path,     // add
 			url_params,   // ad
                 );
+            }
+           // _ => continue,
+			
+			None => {
+                eprintln!("[transport] connection to gateway dropped - exiting for restart");
+                exit(1);
             }
             _ => continue,
         }
@@ -435,8 +444,10 @@ impl StreamConnection {
                         return;
                     }
 
-                    this.on_ipc_message(message).await;
+					this.on_ipc_message(message).await;
                 }
+                eprintln!("[transport] connection to gateway dropped - exiting for restart");
+                exit(1);
             }
         });
 
