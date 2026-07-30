@@ -54,7 +54,7 @@ pub async fn connect_websocket_ipc(
     let (ws_stream, _resp) = connect_async(request).await?;
    info!(
         "[ws] connected, registering as '{}' (machine '{}')",
-        cfg.streamer_id, cfg.machine_id
+        cfg.streamer_id, cfg.device_id
     );
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -63,7 +63,7 @@ pub async fn connect_websocket_ipc(
     let register = serde_json::json!({
         "type": "register",
         "id": cfg.streamer_id,
-        "machine_id": cfg.machine_id,
+        "device_id": cfg.device_id,
         "token": cfg.auth_token,
     });
     ws_write.send(Message::Text(register.to_string())).await?;
@@ -113,15 +113,15 @@ pub async fn connect_websocket_ipc(
     let sunshine_address = cfg.sunshine_address.clone();
     let sunshine_http_port = cfg.sunshine_http_port;
     // Copy-URL: this machine's own stable id, already computed at startup
-    // (transport_config.rs default_machine_id()). GetMachineInfo answers from
+    // (transport_config.rs default_device_id()). GetDeviceInfo answers from
     // this directly - no HTTP call to Sunshine, no dependency on Sunshine (or
     // this box) having any reachable/static address. Same value Sunshine's own
-    // util::sanitize_machine_id(get_host_name()) would report, since they run
+    // util::sanitize_device_id(get_host_name()) would report, since they run
     // on the same machine and apply the identical sanitize rule.
-    let machine_id = cfg.machine_id.clone();
+    let device_id = cfg.device_id.clone();
     // Self-pairing: when a PIN is configured the streamer owns its own certs
     // (cached in pairing_file) and ignores whatever Node sends per request.
-    // Threaded down the same way machine_id is - handle_request/get_app_list
+    // Threaded down the same way device_id is - handle_request/get_app_list
     // never see the whole TransportConfig.
     let pairing_pin = cfg.pairing_pin.clone();
     let pairing_file = cfg.pairing_file.clone();
@@ -145,7 +145,7 @@ pub async fn connect_websocket_ipc(
                             // HTTP call can't stall the message loop.
 							let reply_tx = request_tx.clone();
                             let addr = sunshine_address.clone();
-                            let mid = machine_id.clone();
+                            let mid = device_id.clone();
                             let pin = pairing_pin.clone();
                             let pfile = pairing_file.clone();
                             let span_req = span_a.clone();
@@ -265,7 +265,7 @@ async fn handle_request(
     text: String,
     sunshine_address: String,
     sunshine_http_port: u16,
-    machine_id: String,
+    device_id: String,
     pairing_pin: Option<String>,
     pairing_file: String,
     reply_tx: mpsc::UnboundedSender<Message>,
@@ -291,7 +291,7 @@ async fn handle_request(
                 &params,
                 pairing_pin.as_deref(),
                 &pairing_file,
-                &machine_id,
+                &device_id,
             )
             .await
         }
@@ -299,7 +299,7 @@ async fn handle_request(
         // regardless of any static/public IP) for its machine id, rather than
         // Node calling Sunshine's HTTP API directly. Answered from our own
         // config - no network call, no address dependency at all.
-        "GetMachineInfo" => Ok(serde_json::json!({ "machineid": machine_id })),
+        "GetDeviceInfo" => Ok(serde_json::json!({ "deviceid": device_id })),
         other => Err(format!("unknown request method '{other}'")),
     };
 
@@ -380,7 +380,6 @@ async fn get_app_list(
             .map_err(|err| format!("failed to set pairing info: {err:?}"))?;
         }
     }
-
 
     let apps = host
         .app_list()

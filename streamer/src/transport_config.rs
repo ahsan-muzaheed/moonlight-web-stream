@@ -90,12 +90,12 @@ pub struct TransportConfig {
     pub streamer_id: String,
 
     /// STABLE machine identifier = hostname only (no PID suffix), so it survives
-    /// restarts. This is the value Copy-URL share links carry (?machineid=): the
+    /// restarts. This is the value Copy-URL share links carry (?deviceid=): the
     /// link targets the MACHINE, and the Node registry maps it to whichever
     /// streamer on that machine is free. Two streamers on one box share this;
     /// they are told apart by streamer_id.
-    #[serde(default = "default_machine_id")]
-    pub machine_id: String,
+    #[serde(default = "default_device_id")]
+    pub device_id: String,
 
     /// Shared secret sent in the register handshake. Optional in dev.
     #[serde(default)]
@@ -131,7 +131,7 @@ pub struct TransportConfig {
     pub pairing_pin: Option<String>,
 
     /// Where the 3 PEMs are cached after a successful pair.
-   #[serde(default = "default_pairing_file")]
+    #[serde(default = "default_pairing_file")]
     pub pairing_file: String,
 
     /// Seconds between reconnect attempts when the initial websocket
@@ -151,7 +151,7 @@ pub struct TransportConfig {
 /// key. If two default ids ever matched, the registry's add() would drop one
 /// socket in favour of the other — this makes that impossible without anyone
 /// having to hand-set streamer_id in streamer.toml.
-fn default_machine_id() -> String {
+fn default_device_id() -> String {
     let host = hostname::get()
         .ok()
         .and_then(|h| h.into_string().ok())
@@ -166,7 +166,7 @@ fn default_machine_id() -> String {
 }
 
 fn default_streamer_id() -> String {
-    format!("{}-{}", default_machine_id(), std::process::id())
+    format!("{}-{}", default_device_id(), std::process::id())
 }
 /// Whitelist sanitizer: keep ASCII letters/digits/hyphen; turn every other
 /// character (space, underscore, dot, slash, backslash, colon, quotes, ...)
@@ -213,13 +213,13 @@ impl Default for TransportConfig {
             transport: TransportMode::Stdio,
             server_url: None,
             streamer_id: default_streamer_id(),
-			   machine_id: default_machine_id(),
+			   device_id: default_device_id(),
             auth_token: None,
             sunshine_address: default_sunshine_address(),
             sunshine_http_port: default_sunshine_http_port(),
             app_directory: None,
 			pairing_pin: None,
-			pairing_file: default_pairing_file(),
+            pairing_file: default_pairing_file(),
             reconnect_interval_secs: default_reconnect_interval_secs(),
         }
     }
@@ -272,7 +272,7 @@ impl TransportConfig {
 
                                 eprintln!(
                                     "[pairing] self-pairing ENABLED - pin={masked} device_name={} file={}",
-                                    cfg.machine_id, cfg.pairing_file
+                                    cfg.device_id, cfg.pairing_file
                                 );
                                 if PathBuf::from(&cfg.pairing_file).exists() {
                                     eprintln!(
