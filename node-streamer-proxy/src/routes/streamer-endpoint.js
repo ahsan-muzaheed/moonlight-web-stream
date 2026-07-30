@@ -1,13 +1,16 @@
 "use strict";
 
 const WebSocket = require("ws");
+const { defaultUser } = require("../auth");
 
 /**
  * The endpoint streamer daemons dial INTO (new architecture).
  *   GET /api/streamer/connect
  *
  * Handshake (this step only - no browser relay yet):
-*   1. streamer opens the WS and sends:  { "type":"register", "id":"<streamer_id>", "device_id":"<hostname>", "token":"<auth_token>" }
+*   1. streamer opens the WS and sends:  { "type":"register", "id":"<streamer_id>", "device_id":"<hostname>", "token":"<auth_token>", "address":"<ip>", "http_port":<port> }
+ *      address/http_port let Node auto-create a Host record on first
+ *      register - see autoLinkStreamerToHost below.
  *   2. Node checks the token, registers the connection, replies:
  *        { "type":"registered", "id":"<id>" }        on success
  *        { "type":"error", "reason":"..." } + close   on failure
@@ -84,8 +87,10 @@ function registerStreamerEndpoint(app, ctx, registry) {
 clearTimeout(registerTimer);
         const deviceId =
           typeof msg.device_id === "string" && msg.device_id ? msg.device_id : null;
+        const address = typeof msg.address === "string" && msg.address ? msg.address : null;
+        const httpPort = Number.isInteger(msg.http_port) ? msg.http_port : null;
         registered = registry.add(msg.id, ws, deviceId);
-        autoLinkStreamerToHost(ctx, msg.id, deviceId);
+        autoLinkStreamerToHost(ctx, msg.id, deviceId, address, httpPort);
         safeSend(ws, { type: "registered", id: msg.id });
         return;
       }
@@ -131,19 +136,25 @@ clearTimeout(registerTimer);
 }
 
 /**
- * Replaces the old manual "POST /host/refresh-device-info" step for the
- * common case. Runs on every register, so it also self-heals if a host's
- * link is ever lost.
+ * Runs on every register, so it also self-heals if a host's link is ever
+ * lost.
  *
- * Matching rule (deliberately conservative - never guesses):
+ * Matching rule:
  *   1. Already linked to this exact streamerId?              -> nothing to do.
  *   2. Exactly ONE unlinked host record shares this deviceId? -> link it.
- *   3. Zero or MULTIPLE such candidates?                      -> leave it alone
- *      and log why, rather than risk attaching to the wrong host. (Multiple
- *      candidates means two different physical machines share a deviceId -
- *      that still needs a manual/admin resolution.)
+ *   3. Zero such candidates, and this register included an address?
+ *        -> create the Host record outright, owned by the configured
+ *           default user, then link it. Both streamer types (Rust and
+ *           Sunshine) now send their own address/http_port in "register",
+ *           so there's nothing left for a human to fill in.
+ *   4. Zero candidates, no address given (older streamer build)?
+ *        -> leave it alone and log why, same as before.
+ *   5. MULTIPLE candidates?
+ *        -> leave it alone and log why, rather than risk attaching to the
+ *           wrong host. (Two different physical machines sharing a deviceId
+ *           still needs a manual/admin resolution.)
  */
-function autoLinkStreamerToHost(ctx, streamerId, deviceId) {
+function autoLinkStreamerToHost(ctx, streamerId, deviceId, address, httpPort) {
   if (!deviceId) return; // nothing to match on
   const storage = ctx.storage;
 
@@ -154,14 +165,32 @@ function autoLinkStreamerToHost(ctx, streamerId, deviceId) {
     const host = candidates[0];
     storage.patchHost(host.id, { deviceId, streamerId });
     console.log(`[StreamerGW] auto-linked streamer "${streamerId}" -> host ${host.id} (machine "${deviceId}")`);
-  } else if (candidates.length === 0) {
-    console.log(`[StreamerGW] no unlinked host found for machine "${deviceId}" (streamer "${streamerId}") - add/link it manually`);
-  } else {
-    console.warn(
-      `[StreamerGW] ${candidates.length} unlinked hosts share machine "${deviceId}" - ` +
-      `can't auto-link streamer "${streamerId}", resolve manually`
-    );
+    return;
   }
+
+  if (candidates.length === 0) {
+    if (address) {
+      const owner = defaultUser(ctx);
+      if (!owner) {
+        console.warn(
+          `[StreamerGW] no unlinked host for machine "${deviceId}" and no default_user_id configured - ` +
+          `can't auto-create, add/link it manually`
+        );
+        return;
+      }
+      const host = storage.addHost({ address, httpPort, ownerId: owner.id });
+      storage.patchHost(host.id, { deviceId, streamerId });
+      console.log(`[StreamerGW] auto-created host ${host.id} (machine "${deviceId}") for streamer "${streamerId}"`);
+    } else {
+      console.log(`[StreamerGW] no unlinked host found for machine "${deviceId}" (streamer "${streamerId}") - add/link it manually`);
+    }
+    return;
+  }
+
+  console.warn(
+    `[StreamerGW] ${candidates.length} unlinked hosts share machine "${deviceId}" - ` +
+    `can't auto-link streamer "${streamerId}", resolve manually`
+  );
 }
 
 function safeSend(ws, obj) {
