@@ -126,7 +126,10 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
     ? storage.getHostForUser(user, hostId) // throws HostNotFound/Forbidden
     : storage.getHostByDeviceIdForUser(user, urlParams && urlParams.deviceid);
 	
-  if (!host.pairInfo) throw new Error("HostNotPaired");
+  // Self-pairing streamers pair directly with Sunshine using their own
+  // configured PIN - Node never sees cert data for them, so this only
+  // gates the legacy direct-to-Sunshine path (no streamer connected).
+  if (!streamerConn && !host.pairInfo) throw new Error("HostNotPaired");
  
   // Prefer an app NAME if the URL supplied one - ids are CRC32(name+image), so
   // they change if an app is renamed, silently breaking saved links.
