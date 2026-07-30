@@ -185,6 +185,7 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
  
   // Field names/shapes here must match Rust ServerIpcMessage::Init exactly.
   return {
+	host,
     payload: {
       config: {
         webrtc: config.webrtc,
@@ -329,7 +330,8 @@ function registerStreamRoutes(app, ctx) {
       }
 
       // Reconnecting to a host whose teardown is still pending? Abort it.
-      activeHost = ctx.storage.getHost(init.host_id);
+      //activeHost = ctx.storage.getHost(init.host_id);
+	    activeHost = built.host;
       const pending = pendingCancels.get(String(init.host_id));
       if (pending) {
         clearTimeout(pending);
