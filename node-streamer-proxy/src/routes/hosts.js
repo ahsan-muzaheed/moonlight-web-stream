@@ -128,17 +128,17 @@ function hostRoutes(ctx) {
     }
   });
 
-  // ---- Refresh a paired host's machineId without re-pairing --------------
+  // ---- Refresh a paired host's deviceId without re-pairing --------------
   // Fixes hosts paired BEFORE the auto-capture-at-pairing-time logic above
-  // existed (their storage.json record has no machineId, so a Copy-URL
-  // machineid-only link 404s with HostNotFound even though the host is
+  // existed (their storage.json record has no deviceId, so a Copy-URL
+  // deviceid-only link 404s with HostNotFound even though the host is
   // paired and reachable). Re-running the full PIN handshake just to pick up
   // one field is unnecessary and disruptive - this hits the same paired
   // /api/machine-info endpoint the pairing flow does, using the cert this
   // host already has, and just patches the one field. 
-	router.post("/host/refresh-machine-info", auth, async (req, res) => {
+	router.post("/host/refresh-device-info", auth, async (req, res) => {
 	
-	console.log(`/host/refresh-machine-info`)
+	console.log(`/host/refresh-device-info`)
 	
     let host;
     try {
@@ -147,35 +147,35 @@ function hostRoutes(ctx) {
       return res.status(errStatus(err)).json({ error: err.message });
     }
 
-    const { machine_id: wantMachineId, streamer_id: wantStreamerId } = req.body;
+    const { device_id: wantDeviceId, streamer_id: wantStreamerId } = req.body;
     let conn = null;
     if (wantStreamerId) {
       conn = ctx.streamerRegistry.get(wantStreamerId);
-    } else if (wantMachineId) {
-      conn = ctx.streamerRegistry.pickByMachineId(wantMachineId);
+    } else if (wantDeviceId) {
+      conn = ctx.streamerRegistry.pickByDeviceId(wantDeviceId);
     }
     if (!conn) {
       return res.status(409).json({
         error:
-          "NoStreamerConnected: pass machine_id or streamer_id for a currently-connected " +
+          "NoStreamerConnected: pass device_id or streamer_id for a currently-connected " +
           "streamer (see GET /api/streamer/list)",
       });
     }
 
     try {
-      const result = await conn.request("GetMachineInfo", {});
-      const machineId = result && result.machineid;
-      if (!machineId) {
-        throw new Error("streamer returned no machineid");
+      const result = await conn.request("GetDeviceInfo", {});
+      const deviceId = result && result.deviceid;
+      if (!deviceId) {
+        throw new Error("streamer returned no deviceid");
       }
-      storage.patchHost(host.id, { machineId });
+      storage.patchHost(host.id, { deviceId });
       console.log(
-        `[MachineInfo] host ${host.id} linked to machine "${machineId}" ` +
+        `[DeviceInfo] host ${host.id} linked to machine "${deviceId}" ` +
         `(via streamer "${conn.id}")`
       );
-      res.json({ host_id: host.id, machine_id: machineId });
+      res.json({ host_id: host.id, device_id: deviceId });
     } catch (err) {
-      console.warn(`[MachineInfo] host ${host.id} refresh failed:`, err.message);
+      console.warn(`[DeviceInfo] host ${host.id} refresh failed:`, err.message);
       res.status(502).json({ error: err.message });
     }
   });
@@ -202,7 +202,7 @@ function hostRoutes(ctx) {
     try {
       const host = storage.getHostForUser(req.user, req.query.host_id);
 
-      const conn = host.machineId ? ctx.streamerRegistry.pickByMachineId(host.machineId) : null;
+      const conn = host.deviceId ? ctx.streamerRegistry.pickByDeviceId(host.deviceId) : null;
       if (!conn) {
         return res.status(409).json({
           error: "NoStreamerConnected: this host's streamer must be online to list apps (self-pairing runs on the streamer, not Node)",

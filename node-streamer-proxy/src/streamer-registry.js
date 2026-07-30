@@ -17,9 +17,9 @@
  */
 
 class StreamerConnection {
-  constructor(id, ws, machineId) {
+  constructor(id, ws, deviceId) {
     this.id = id;
-    this.machineId = machineId || null;
+    this.deviceId = deviceId || null;
     this.ws = ws;
     this.connectedAt = Date.now();
     this.lastSeen = Date.now();
@@ -133,26 +133,26 @@ class StreamerConnection {
 class StreamerRegistry {
   constructor() {
     this.byId = new Map();
-    this.byMachine = new Map();
+    this.byDevice = new Map();
   }
 
-  add(id, ws, machineId) {
+  add(id, ws, deviceId) {
     const existing = this.byId.get(id);
     if (existing && existing.ws !== ws) {
       console.warn(`[Registry] streamer "${id}" reconnected, replacing old socket`);
-      this._deindexMachine(existing);
+      this._deindexDevice(existing);
       try { existing.ws.close(); } catch { /* ignore */ }
     }
 
-    const conn = new StreamerConnection(id, ws, machineId);
+    const conn = new StreamerConnection(id, ws, deviceId);
     this.byId.set(id, conn);
-    if (conn.machineId) {
-      let set = this.byMachine.get(conn.machineId);
-      if (!set) { set = new Set(); this.byMachine.set(conn.machineId, set); }
+    if (conn.deviceId) {
+      let set = this.byDevice.get(conn.deviceId);
+      if (!set) { set = new Set(); this.byDevice.set(conn.deviceId, set); }
       set.add(id);
     }
     console.log(
-      `[Registry] streamer "${id}" registered on machine "${conn.machineId || "?"}" (${this.byId.size} total)`
+      `[Registry] streamer "${id}" registered on machine "${conn.deviceId || "?"}" (${this.byId.size} total)`
     );
     return conn;
   }
@@ -161,37 +161,62 @@ class StreamerRegistry {
     const conn = this.byId.get(id);
     if (conn && conn.ws === ws) {
       this.byId.delete(id);
-      this._deindexMachine(conn);
+      this._deindexDevice(conn);
       console.log(`[Registry] streamer "${id}" removed (${this.byId.size} left)`);
     }
   }
 
-  _deindexMachine(conn) {
-    if (!conn || !conn.machineId) return;
-    const set = this.byMachine.get(conn.machineId);
+  _deindexDevice(conn) {
+    if (!conn || !conn.deviceId) return;
+    const set = this.byDevice.get(conn.deviceId);
     if (!set) return;
     set.delete(conn.id);
-    if (set.size === 0) this.byMachine.delete(conn.machineId);
+    if (set.size === 0) this.byDevice.delete(conn.deviceId);
   }
 
 get(id) {
     return this.byId.get(id) || null;
   }
 
-  pickByMachineId(machineId) {
-    const set = this.byMachine.get(machineId);
-    if (!set || set.size === 0) return null;
+  /**
+   * Every currently-available connection sharing this deviceId.
+   *
+   * One deviceId can legitimately map to several live streamers: multiple
+   * Sunshine+streamer pairs on one powerful machine, or two unrelated boxes
+   * that happen to report the same hostname. Each pair may expose a
+   * DIFFERENT app list, so "which one can serve this app?" cannot be answered
+   * here — the caller has to ask each candidate. Hence: return all of them,
+   * in registration order, and let the caller probe.
+   *
+   * @returns {StreamerConnection[]} possibly empty, never null.
+   */
+  listAvailableByDeviceId(deviceId) {
+    const set = this.byDevice.get(deviceId);
+    if (!set || set.size === 0) return [];
+    const out = [];
     for (const id of set) {
       const conn = this.byId.get(id);
-      if (conn && conn.isAvailable()) return conn;
+      if (conn && conn.isAvailable()) out.push(conn);
     }
-    return null;
+    return out;
+  }
+
+  /**
+   * First available connection for this deviceId, or null.
+   *
+   * Kept for callers that genuinely don't care which pair they get (wake,
+   * device-info refresh, and similar deviceId-scoped admin actions). Anything
+   * that depends on the target's app list must use listAvailableByDeviceId
+   * and probe instead — the first candidate may not host the wanted app.
+   */
+  pickByDeviceId(deviceId) {
+    return this.listAvailableByDeviceId(deviceId)[0] || null;
   }
 
   list() {
     return Array.from(this.byId.values()).map((c) => ({
       id: c.id,
-      machineId: c.machineId,
+      deviceId: c.deviceId,
       busy: c.busy,
       draining: c.draining,
       connectedAt: c.connectedAt,

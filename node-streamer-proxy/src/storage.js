@@ -12,7 +12,14 @@ const crypto = require("crypto");
  *   version: 1,
  *   users:    { [userId]: { id, name, password: {salt,hash,iterations}, roleId, hostUniqueId } },
  *   roles:    { [roleId]: { id, name, ty: "Admin"|"User", defaultSettings, permissions } },
- *   hosts:    { [hostId]: { id, address, httpPort, ownerId, pairInfo, cache } },
+ *   hosts:    { [hostId]: { id, address, httpPort, ownerId, pairInfo, cache, deviceId, streamerId } },
+ *     deviceId  - stable hostname reported by the streamer daemon (may collide
+ *                  across different physical machines - not unique alone).
+ *     streamerId - the connecting streamer's own id, captured at register time.
+ *                  Together with deviceId this is what disambiguates two
+ *                  different physical machines that happen to report the same
+ *                  deviceId. hostId (the record's own id) stays internal-only;
+ *                  the streaming path never sends or needs it anymore.
  *   sessions: { [token]: { userId, expiresAt } }
  * }
  *
@@ -231,15 +238,35 @@ class Storage {
     return id === null ? null : this.data.hosts[id] || null;
   }
 
-  /** Reverse lookup: stable machine id (hostname) -> host record. */
-  getHostByMachineId(machineId) {
-    if (!machineId) return null;
-    return this.listHosts().find((h) => h.machineId === machineId) || null;
+  /** Reverse lookup: stable machine id (hostname) -> host record.
+   *  Returns the FIRST match only - kept for callers that know deviceId is
+   *  unique for their case. When two physical machines can share a deviceId,
+   *  use getHostsByDeviceId() instead and disambiguate further. */
+  getHostByDeviceId(deviceId) {
+    if (!deviceId) return null;
+    return this.listHosts().find((h) => h.deviceId === deviceId) || null;
   }
 
-  /** Same ownership rule as getHostForUser, but keyed by machineId. */
-  getHostByMachineIdForUser(user, machineId) {
-    const host = this.getHostByMachineId(machineId);
+  /** Same lookup, but returns EVERY host record sharing that deviceId - the
+   *  collision case (two different physical machines reporting the same
+   *  hostname/deviceId). Caller disambiguates further, e.g. by checking
+   *  which one's streamer actually has the wanted app. */
+  getHostsByDeviceId(deviceId) {
+    if (!deviceId) return [];
+    return this.listHosts().filter((h) => h.deviceId === deviceId);
+  }
+
+  /** Exact link: a specific streamer connection's own id -> its host record.
+   *  Set at register time (see streamer-endpoint.js), this is what
+   *  disambiguates two host records that share a deviceId. */
+  getHostByStreamerId(streamerId) {
+    if (!streamerId) return null;
+    return this.listHosts().find((h) => h.streamerId === streamerId) || null;
+  }
+
+  /** Same ownership rule as getHostForUser, but keyed by deviceId. */
+  getHostByDeviceIdForUser(user, deviceId) {
+    const host = this.getHostByDeviceId(deviceId);
     if (!host) throw new Error("HostNotFound");
     if (!this.isAdmin(user) && host.ownerId !== user.id) throw new Error("Forbidden");
     return host;

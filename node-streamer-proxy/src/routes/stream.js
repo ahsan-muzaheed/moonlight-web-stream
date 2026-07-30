@@ -5,7 +5,6 @@ const readline = require("readline");
 const WebSocket = require("ws");
 const { resolveUser } = require("../auth");
 const moonlight = require("../moonlight/client");
-const { toPkcs8 } = require("../moonlight/crypto");
 
 /**
  * The signaling relay + streamer lifecycle.
@@ -125,7 +124,7 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
   
   const host = hostId
     ? storage.getHostForUser(user, hostId) // throws HostNotFound/Forbidden
-    : storage.getHostByMachineIdForUser(user, urlParams && urlParams.machineid);
+    : storage.getHostByDeviceIdForUser(user, urlParams && urlParams.deviceid);
 	
   if (!host.pairInfo) throw new Error("HostNotPaired");
  
@@ -191,9 +190,8 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
       host_address: host.address,
       host_http_port: host.httpPort,
       client_unique_id: user.hostUniqueId,
-      client_private_key: toPkcs8(host.pairInfo.clientPrivateKey),
-      client_certificate: host.pairInfo.clientCertificate,
-      server_certificate: host.pairInfo.serverCertificate,
+      // No pairing certs sent - the streamer self-pairs with Sunshine
+      // directly using the shared PIN in its own config.
       // The id resolved above - NOT the raw ?appId= from the URL. When the
       // caller used ?appName=, this is the id we looked up for that name.
       app_id: app.app_id,
@@ -295,14 +293,14 @@ function registerStreamRoutes(app, ctx) {
 		if (useConnectedStreamer) {
           const params = init.url_params || {};
           const wantStreamerId = params.streamer || null;
-          const wantMachineId = params.machineid || null;
+          const wantDeviceId = params.deviceid || null;
 
           if (wantStreamerId) {
             requestedTarget = { kind: "streamer", id: wantStreamerId };
             pickedConn = registry.get(wantStreamerId);
-          } else if (wantMachineId) {
-            requestedTarget = { kind: "machine", id: wantMachineId };
-            pickedConn = registry.pickByMachineId(wantMachineId);
+          } else if (wantDeviceId) {
+            requestedTarget = { kind: "machine", id: wantDeviceId };
+            pickedConn = registry.pickByDeviceId(wantDeviceId);
           } else {
             pickedConn = registry
               .list()
@@ -310,7 +308,7 @@ function registerStreamRoutes(app, ctx) {
               .map((st) => registry.get(st.id))[0];
           }
         }
-		console.log("[Stream] picked:", pickedConn ? `streamer=${pickedConn.id} machine=${pickedConn.machineId} alive=${pickedConn.isAlive()}` : "NONE", "requested:", JSON.stringify(requestedTarget));
+		console.log("[Stream] picked:", pickedConn ? `streamer=${pickedConn.id} machine=${pickedConn.deviceId} alive=${pickedConn.isAlive()}` : "NONE", "requested:", JSON.stringify(requestedTarget));
         built = await buildInitPayload(ctx, user, {
           hostId: init.host_id,
           appId: init.app_id,

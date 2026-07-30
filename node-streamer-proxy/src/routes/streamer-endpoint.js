@@ -7,7 +7,7 @@ const WebSocket = require("ws");
  *   GET /api/streamer/connect
  *
  * Handshake (this step only - no browser relay yet):
-*   1. streamer opens the WS and sends:  { "type":"register", "id":"<streamer_id>", "machine_id":"<hostname>", "token":"<auth_token>" }
+*   1. streamer opens the WS and sends:  { "type":"register", "id":"<streamer_id>", "device_id":"<hostname>", "token":"<auth_token>" }
  *   2. Node checks the token, registers the connection, replies:
  *        { "type":"registered", "id":"<id>" }        on success
  *        { "type":"error", "reason":"..." } + close   on failure
@@ -82,9 +82,10 @@ function registerStreamerEndpoint(app, ctx, registry) {
         }
 
 clearTimeout(registerTimer);
-        const machineId =
-          typeof msg.machine_id === "string" && msg.machine_id ? msg.machine_id : null;
-        registered = registry.add(msg.id, ws, machineId);
+        const deviceId =
+          typeof msg.device_id === "string" && msg.device_id ? msg.device_id : null;
+        registered = registry.add(msg.id, ws, deviceId);
+        autoLinkStreamerToHost(ctx, msg.id, deviceId);
         safeSend(ws, { type: "registered", id: msg.id });
         return;
       }
@@ -127,6 +128,40 @@ clearTimeout(registerTimer);
   app.get("/api/streamer/list", (req, res) => {
     res.json({ streamers: registry.list() });
   });
+}
+
+/**
+ * Replaces the old manual "POST /host/refresh-device-info" step for the
+ * common case. Runs on every register, so it also self-heals if a host's
+ * link is ever lost.
+ *
+ * Matching rule (deliberately conservative - never guesses):
+ *   1. Already linked to this exact streamerId?              -> nothing to do.
+ *   2. Exactly ONE unlinked host record shares this deviceId? -> link it.
+ *   3. Zero or MULTIPLE such candidates?                      -> leave it alone
+ *      and log why, rather than risk attaching to the wrong host. (Multiple
+ *      candidates means two different physical machines share a deviceId -
+ *      that still needs a manual/admin resolution.)
+ */
+function autoLinkStreamerToHost(ctx, streamerId, deviceId) {
+  if (!deviceId) return; // nothing to match on
+  const storage = ctx.storage;
+
+  if (storage.getHostByStreamerId(streamerId)) return; // already linked
+
+  const candidates = storage.getHostsByDeviceId(deviceId).filter((h) => !h.streamerId);
+  if (candidates.length === 1) {
+    const host = candidates[0];
+    storage.patchHost(host.id, { deviceId, streamerId });
+    console.log(`[StreamerGW] auto-linked streamer "${streamerId}" -> host ${host.id} (machine "${deviceId}")`);
+  } else if (candidates.length === 0) {
+    console.log(`[StreamerGW] no unlinked host found for machine "${deviceId}" (streamer "${streamerId}") - add/link it manually`);
+  } else {
+    console.warn(
+      `[StreamerGW] ${candidates.length} unlinked hosts share machine "${deviceId}" - ` +
+      `can't auto-link streamer "${streamerId}", resolve manually`
+    );
+  }
 }
 
 function safeSend(ws, obj) {
