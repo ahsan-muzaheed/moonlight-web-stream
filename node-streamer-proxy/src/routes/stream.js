@@ -126,7 +126,15 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
     ? storage.getHostForUser(user, hostId) // throws HostNotFound/Forbidden
     : storage.getHostByDeviceIdForUser(user, urlParams && urlParams.deviceid);
 	
-  if (!host.pairInfo) throw new Error("HostNotPaired");
+  // Self-pairing streamers pair directly with Sunshine using their own
+  // configured PIN - Node never sees cert data for them, so this only
+  // gates the legacy direct-to-Sunshine path (no streamer connected).
+  //if (!streamerConn && !host.pairInfo) throw new Error("HostNotPaired");
+  
+  if (!streamerConn && !host.pairInfo) {
+    if (host.streamerId) throw new Error("StreamerUnavailable");
+    throw new Error("HostNotPaired");
+  }
  
   // Prefer an app NAME if the URL supplied one - ids are CRC32(name+image), so
   // they change if an app is renamed, silently breaking saved links.
@@ -182,6 +190,7 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
  
   // Field names/shapes here must match Rust ServerIpcMessage::Init exactly.
   return {
+	host,
     payload: {
       config: {
         webrtc: config.webrtc,
@@ -319,14 +328,16 @@ function registerStreamRoutes(app, ctx) {
           urlPath: init.url_path,
           urlParams: init.url_params,
         }, pickedConn);
-      } catch (err) {
+	} catch (err) {
         console.warn("[Stream] failed to start:", err.message);
-        sendClientText({ DebugLog: { message: `Failed to start stream: ${err.message}`, ty: "FatalDescription" } });
+        const retryable = err.message === "StreamerUnavailable";
+        sendClientText({ DebugLog: { message: retryable ? "No machine available" : `Failed to start stream: ${err.message}`, ty: retryable ? "Retryable" : "FatalDescription" } });
         return ws.close();
       }
 
       // Reconnecting to a host whose teardown is still pending? Abort it.
-      activeHost = ctx.storage.getHost(init.host_id);
+      //activeHost = ctx.storage.getHost(init.host_id);
+	    activeHost = built.host;
       const pending = pendingCancels.get(String(init.host_id));
       if (pending) {
         clearTimeout(pending);
