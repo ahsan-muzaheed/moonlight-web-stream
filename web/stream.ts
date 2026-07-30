@@ -47,11 +47,11 @@ if (hostIdStr === null && isPrettyUrl) {
 
 const appIdStr = queryParams.get("appId")
 const appNameStr = queryParams.get("appName")
-// Copy-URL from Sunshine's Apps page carries machineid instead of hostId
+// Copy-URL from Sunshine's Apps page carries deviceid instead of hostId
 // (Sunshine has no hostId - it's Node's bookkeeping id, not the machine's).
-// Node resolves the host from machineid on its own; the frontend only needs
+// Node resolves the host from deviceid on its own; the frontend only needs
 // to know it's not required to reject the link for lacking hostId.
-const machineIdStr = queryParams.get("machineid")
+const deviceIdStr = queryParams.get("deviceid")
 
 
 let appStr = queryParams.get("app")
@@ -76,16 +76,16 @@ if (isPrettyUrl) {
     }
 }
 
-if ((!hostIdStr && !machineIdStr) || (!appIdStr && !appNameStr && !appStr)) {
+if ((!hostIdStr && !deviceIdStr) || (!appIdStr && !appNameStr && !appStr)) {
     await showMessage(I.stream.missingHostOrApp)
     window.close()
     return
 }
 
 
-    // hostIdStr can legitimately be null now (machineid-only Copy-URL link).
+    // hostIdStr can legitimately be null now (deviceid-only Copy-URL link).
     // NaN -> JSON.stringify emits null -> Node's buildInitPayload treats a
-    // null host_id as "resolve by machineid instead" (see stream.js).
+    // null host_id as "resolve by deviceid instead" (see stream.js).
     const hostId = hostIdStr ? Number.parseInt(hostIdStr) : NaN
 	
 	
