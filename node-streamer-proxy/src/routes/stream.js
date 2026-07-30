@@ -129,7 +129,12 @@ async function buildInitPayload(ctx, user, { hostId, appId, videoFrameQueueSize,
   // Self-pairing streamers pair directly with Sunshine using their own
   // configured PIN - Node never sees cert data for them, so this only
   // gates the legacy direct-to-Sunshine path (no streamer connected).
-  if (!streamerConn && !host.pairInfo) throw new Error("HostNotPaired");
+  //if (!streamerConn && !host.pairInfo) throw new Error("HostNotPaired");
+  
+  if (!streamerConn && !host.pairInfo) {
+    if (host.streamerId) throw new Error("StreamerUnavailable");
+    throw new Error("HostNotPaired");
+  }
  
   // Prefer an app NAME if the URL supplied one - ids are CRC32(name+image), so
   // they change if an app is renamed, silently breaking saved links.
@@ -323,9 +328,10 @@ function registerStreamRoutes(app, ctx) {
           urlPath: init.url_path,
           urlParams: init.url_params,
         }, pickedConn);
-      } catch (err) {
+	} catch (err) {
         console.warn("[Stream] failed to start:", err.message);
-        sendClientText({ DebugLog: { message: `Failed to start stream: ${err.message}`, ty: "FatalDescription" } });
+        const retryable = err.message === "StreamerUnavailable";
+        sendClientText({ DebugLog: { message: retryable ? "No machine available" : `Failed to start stream: ${err.message}`, ty: retryable ? "Retryable" : "FatalDescription" } });
         return ws.close();
       }
 
