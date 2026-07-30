@@ -65,6 +65,11 @@ pub async fn connect_websocket_ipc(
         "id": cfg.streamer_id,
         "device_id": cfg.device_id,
         "token": cfg.auth_token,
+        // Lets Node auto-create a Host record on first register instead of
+        // requiring a manual add - see autoLinkStreamerToHost in
+        // streamer-endpoint.js. Sunshine's own address/port dial in.
+        "address": cfg.sunshine_address,
+        "http_port": cfg.sunshine_http_port,
     });
     ws_write.send(Message::Text(register.to_string())).await?;
 
